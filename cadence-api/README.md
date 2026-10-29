@@ -18,6 +18,11 @@ Expiry status (expired / critical / soon / safe) is computed from the expiry dat
 | POST | `/auth/login` | anyone → `{ access_token, user }` |
 | GET | `/auth/me` | signed in |
 | POST | `/auth/change-password` | signed in |
+| POST | `/auth/forgot-password` `{ email }` | anyone · always 204, so it can't reveal who has an account; emails a one-time link |
+| GET | `/auth/reset-password/{token}` | anyone · `{ valid, name, email }` |
+| POST | `/auth/reset-password` `{ token, password }` | anyone with a valid link · signs the user out on every device |
+| POST | `/users/{id}/send-reset` | `manage_users` · emails the link; returns it only if the email wasn't delivered |
+| POST | `/demo-requests` | public website form · stored, emailed/texted to you; 5 per hour per address |
 | GET | `/items` | `view_inventory` |
 | GET | `/items/barcode/{code}` | signed in (batches FEFO-sorted) |
 | POST | `/items` | `edit_inventory` |
@@ -103,6 +108,12 @@ Everything works in **mock** mode first: tests and digests are recorded in the d
 - Any other question (medicines, storage, regulation, business, general knowledge) is answered from the model's own knowledge. Without a key, Cadence answers stock questions only and says general questions need the AI service.
 - If the provider is down or the key is wrong, answers fall back to the built-in wording, so the page never breaks.
 
+**Password reset and demo requests**
+- Set `APP_URL` to your Vercel address (e.g. `https://cadence-io.vercel.app`). Reset emails link to `APP_URL/reset-password?token=…`.
+- Set `DEMO_NOTIFY_EMAIL` to the inbox that should receive "Book a demo" requests (and optionally `DEMO_NOTIFY_SMS`).
+- Every request is also stored. List them with `python -m app.leads`, or `python -m app.leads --csv > leads.csv`.
+- Until email is switched on, "Forgot password" can't deliver anything. Admins can still open a person's profile → **Reset password**, and Cadence shows the link to pass on in person.
+
 **Daily digest**
 Render's free plan sleeps, so a timer inside the app isn't reliable. Use a free scheduler instead:
 1. cron-job.org → new job → URL `https://<your-service>.onrender.com/api/v1/alerts/cron`, method **POST**, every 15 minutes.
@@ -110,7 +121,7 @@ Render's free plan sleeps, so a timer inside the app isn't reliable. Use a free 
 Each pharmacy gets one digest per day, after its "Send at" time (Ghana time).
 
 ## Database migrations
-`alembic upgrade head` runs on every deploy (see the Dockerfile). Version `0002` adds `notification_settings`, `alert_reads` and `notification_log`.
+`alembic upgrade head` runs on every deploy (see the Dockerfile). Version `0002` adds `notification_settings`, `alert_reads` and `notification_log`. Version `0003` adds `password_resets`, `demo_requests` and `users.password_changed_at`.
 
 ## Next
 Staff invites by email, purchase orders, multi-branch stock transfers.

@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..deps import current_user, require, user_perms
 from ..models import Pharmacy, Role, User
-from ..schemas import PharmacyOut, PharmacyUpdate, RoleOut, UserOut, UserUpdate
+from ..config import get_settings
+from ..schemas import PharmacyOut, PharmacyUpdate, ResetLinkOut, RoleOut, UserOut, UserUpdate
+from ..services import resets
 from ..serializers import user_out
 
 router = APIRouter(tags=["team"])
@@ -71,3 +73,21 @@ async def update_pharmacy(body: PharmacyUpdate, user: User = Depends(require("co
         raise HTTPException(400, "\"Expiring soon\" must be longer than \"Critical\".")
     await db.commit()
     return PharmacyOut.model_validate(ph)
+
+
+@router.post("/users/{user_id}/send-reset", response_model=ResetLinkOut)
+async def send_reset(user_id: str, me: User = Depends(require("manage_users")), db: AsyncSession = Depends(get_db)):
+    """Admin: email someone on the team a link to set a new password. Admins never see or choose the password."""
+    try:
+        target = await db.get(User, uuid.UUID(user_id))
+    except ValueError:
+        target = None
+    if not target or target.pharmacy_id != me.pharmacy_id:
+        raise HTTPException(404, "That person isn't on your team.")
+    if target.status == "Suspended":
+        raise HTTPException(400, "This account is suspended. Set it to Active first.")
+    token = await resets.issue(db, target, "admin")
+    status_, error = await resets.email_link(db, target, token, by_admin=me.name)
+    await db.commit()
+    return ResetLinkOut(status=status_, detail=error, email=target.email, expires_minutes=get_settings().reset_link_minutes,
+                        link=None if status_ == "sent" else resets.link_for(token))

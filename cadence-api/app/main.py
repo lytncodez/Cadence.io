@@ -6,10 +6,10 @@ from sqlalchemy import text
 
 from .config import get_settings
 from .db import engine
-from .routers import ai, alerts, analytics, auth, items, team
+from .routers import ai, alerts, analytics, auth, demo, items, team
 
 settings = get_settings()
-app = FastAPI(title="Cadence.io API", version="0.3.0", docs_url="/docs", redoc_url=None)
+app = FastAPI(title="Cadence.io API", version="0.4.0", docs_url="/docs", redoc_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +31,7 @@ async def readable_validation_errors(_: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": f"{field}: {msg}", "errors": errors})
 
 
-for r in (auth.router, items.router, team.router, analytics.router, alerts.router, ai.router):
+for r in (auth.router, items.router, team.router, analytics.router, alerts.router, ai.router, demo.router):
     app.include_router(r, prefix=settings.api_prefix)
 
 

@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { LuPencil, LuLock, LuMail, LuPhone, LuIdCard, LuBriefcase, LuMapPin, LuShieldCheck, LuCalendar, LuClock, LuCheck, LuMinus, LuArrowLeft, LuImage, LuScanLine, LuBan, LuSparkles, LuPlus, LuUserPlus, LuUpload, LuSettings, LuCopy } from "react-icons/lu";
+import { LuPencil, LuLock, LuMail, LuPhone, LuIdCard, LuBriefcase, LuMapPin, LuShieldCheck, LuCalendar, LuClock, LuCheck, LuMinus, LuArrowLeft, LuImage, LuScanLine, LuBan, LuSparkles, LuPlus, LuUserPlus, LuUpload, LuSettings, LuCopy, LuKeyRound, LuMailCheck, LuTriangleAlert } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { AppShell } from "@/components/layout/AppShell";
 import { Avatar, Badge, Button, Card, CardHeader, Field, Input } from "@/components/ui/primitives";
 import { Modal, useToast } from "@/components/ui/overlay";
-import { api, useCan, useCurrentUser, useStore } from "@/lib/api";
+import { api, useCan, useCurrentUser, useStore, type ResetLinkResult } from "@/lib/api";
 import { PERMISSIONS } from "@/lib/seed";
 import { Link } from "@/lib/router";
 import { addDays, cn, fmtDate, fmtStamp, tenure, todayISO } from "@/lib/utils";
@@ -23,6 +23,7 @@ export default function Profile({ userId }: { userId?: string }) {
   const role = roles.find((r) => r.name === u.role);
   const [edit, setEdit] = useState(false);
   const [pw, setPw] = useState(false);
+  const [reset, setReset] = useState(false);
 
   const activity = useMemo(() => buildActivity(u, items.map((i) => `${i.name.split(" ").slice(0, 2).join(" ")} · ${i.batch}`)), [u, items]);
 
@@ -59,6 +60,7 @@ export default function Profile({ userId }: { userId?: string }) {
           <div className="flex gap-2">
             {(self || can("manage_users")) && <Button onClick={() => setEdit(true)}><LuPencil />Edit profile</Button>}
             {self && <Button onClick={() => setPw(true)}><LuLock />Password</Button>}
+            {!self && can("manage_users") && u.status !== "Suspended" && <Button onClick={() => setReset(true)}><LuKeyRound />Reset password</Button>}
           </div>
           {u.bio && <p className="w-full max-w-3xl text-[15px] leading-relaxed text-ink-2">{u.bio}</p>}
         </div>
@@ -127,6 +129,7 @@ export default function Profile({ userId }: { userId?: string }) {
 
       <EditProfile open={edit} onClose={() => setEdit(false)} user={u} isAdmin={can("manage_users")} />
       <ChangePassword open={pw} onClose={() => setPw(false)} />
+      {!self && <SendReset open={reset} onClose={() => setReset(false)} user={u} />}
     </AppShell>
   );
 }
@@ -244,6 +247,47 @@ export function ChangePassword({ open, onClose }: { open: boolean; onClose: () =
         <Field label="Repeat new password" htmlFor="cp-rep"><Input id="cp-rep" type="password" autoComplete="new-password" value={rep} onChange={(e) => setRep(e.target.value)} /></Field>
         {err && <p role="alert" className="text-sm text-critical-ink">{err}</p>}
       </div>
+    </Modal>
+  );
+}
+
+/** Admin sends a reset link. The admin never sees or sets the password; if the email can't be delivered, they get the link to pass on. */
+function SendReset({ open, onClose, user }: { open: boolean; onClose: () => void; user: User }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false), [err, setErr] = useState(""), [res, setRes] = useState<ResetLinkResult | null>(null);
+  const first = user.name.split(" ")[0];
+  const close = () => { onClose(); setTimeout(() => { setRes(null); setErr(""); }, 200); };
+  async function send() {
+    setBusy(true); setErr("");
+    try {
+      const r = await api.sendReset(user.id);
+      if (r.status === "sent") { toast({ message: `Reset link emailed to ${r.email}` }); close(); } else setRes(r);
+    } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
+  }
+  const copy = () => res?.link && navigator.clipboard?.writeText(res.link).then(() => toast({ message: "Link copied" }), () => toast({ message: "Couldn't copy. Select the link instead.", tone: "error" }));
+  return (
+    <Modal open={open} onClose={close} title={res ? "Share this link with " + first : `Reset ${first}'s password`}
+      description={res ? undefined : `We'll email ${user.email} a link to choose a new password. You won't see their password.`}
+      footer={res ? <Button variant="primary" onClick={close}>Done</Button> : <><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" loading={busy} onClick={send}><LuMailCheck />Send reset link</Button></>}>
+      {res ? (
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
+          <p className={cn("flex items-start gap-2.5 rounded-xl px-3.5 py-3 text-sm", res.status === "failed" ? "bg-critical-soft text-critical-ink" : "bg-soon-soft text-soon-ink")}>
+            <LuTriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <span>{res.status === "failed" ? <>The email couldn't be sent{res.detail ? `: ${res.detail}` : "."}</> : <>Email isn't switched on yet, so nothing was sent.</>} Give {first} this link yourself, for example by WhatsApp.</span>
+          </p>
+          <div className="flex items-center gap-2 rounded-xl border border-line bg-surface-2 p-2 pl-3">
+            <code className="min-w-0 flex-1 truncate font-mono text-xs">{res.link}</code>
+            <Button size="sm" onClick={copy}><LuCopy />Copy</Button>
+          </div>
+          <p className="text-xs text-muted">Only send it to {first}: anyone with the link can set the password. It works once and expires in {res.expiresMinutes} minutes. When it's used, {first} is signed out on every device.</p>
+        </div>
+      ) : err ? <p role="alert" className="text-sm text-critical-ink">{err}</p> : (
+        <ul className="grid gap-2 text-sm text-ink-2">
+          <li className="flex gap-2"><LuCheck className="mt-0.5 size-4 shrink-0 text-safe" />The link works once and expires in 60 minutes.</li>
+          <li className="flex gap-2"><LuCheck className="mt-0.5 size-4 shrink-0 text-safe" />Any older link for {first} stops working.</li>
+          <li className="flex gap-2"><LuCheck className="mt-0.5 size-4 shrink-0 text-safe" />Once {first} sets a new password, they're signed out everywhere else.</li>
+        </ul>
+      )}
     </Modal>
   );
 }

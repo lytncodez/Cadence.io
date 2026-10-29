@@ -154,7 +154,7 @@ export default function Alerts() {
                     <details className="group rounded-xl border border-line px-3 py-2.5 open:bg-surface-2">
                       <summary className="flex cursor-pointer list-none items-center gap-2.5 text-sm [&::-webkit-details-marker]:hidden">
                         {d.channel === "sms" ? <LuMessageSquare className="size-4 text-muted" /> : <LuMail className="size-4 text-muted" />}
-                        <span className="min-w-0 flex-1 truncate">{d.kind === "test" ? "Test" : "Digest"} · {d.recipient}</span>
+                        <span className="min-w-0 flex-1 truncate">{d.kind === "test" ? "Test" : d.kind === "reset" ? "Password reset" : "Digest"} · {d.recipient}</span>
                         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase", d.status === "sent" ? "bg-safe-soft text-safe-ink" : d.status === "failed" ? "bg-critical-soft text-critical-ink" : "bg-brand-soft text-brand-ink")}>{d.status === "mock" ? "logged" : d.status}</span>
                         <time className="hidden shrink-0 text-xs text-muted tabular sm:inline">{fmtStamp(d.createdAt).replace("Today · ", "")}</time>
                       </summary>

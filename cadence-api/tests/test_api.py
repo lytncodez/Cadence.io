@@ -187,3 +187,57 @@ def test_change_password(client):
     h = login(client, "kojo@harbourview.example")
     assert client.post("/api/v1/auth/change-password", json={"current": "nope", "next": "a-much-longer-pass"}, headers=h).status_code == 400
     assert client.post("/api/v1/auth/change-password", json={"current": "cadence2026", "next": "a-much-longer-pass"}, headers=h).status_code == 204
+
+
+def test_forgot_password_never_reveals_accounts(client):
+    assert client.post("/api/v1/auth/forgot-password", json={"email": "nobody@nowhere.example"}).status_code == 204
+    assert client.post("/api/v1/auth/forgot-password", json={"email": "efua@harbourview.example"}).status_code == 204
+    assert client.get("/api/v1/auth/reset-password/not-a-real-token-at-all-xyz").json() == {"valid": False, "name": "", "email": ""}
+
+
+def test_admin_reset_link_flow(client):
+    admin = login(client, "abena@harbourview.example")
+    efua_old = login(client, "efua@harbourview.example")
+    efua_id = next(u["id"] for u in client.get("/api/v1/users", headers=admin).json() if u["email"] == "efua@harbourview.example")
+    # Only admins can send links
+    assert client.post(f"/api/v1/users/{efua_id}/send-reset", headers=efua_old).status_code == 403
+    r = client.post(f"/api/v1/users/{efua_id}/send-reset", headers=admin)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "mock" and body["link"] and body["expiresMinutes"] == 60
+    token = body["link"].split("token=")[1]
+    assert client.get(f"/api/v1/auth/reset-password/{token}").json()["valid"] is True
+    # Too short is refused
+    assert client.post("/api/v1/auth/reset-password", json={"token": token, "password": "short"}).status_code == 422
+    assert client.post("/api/v1/auth/reset-password", json={"token": token, "password": "brand-new-password-1"}).status_code == 204
+    # The link works once, old sessions are signed out, the new password works
+    assert client.post("/api/v1/auth/reset-password", json={"token": token, "password": "another-password-2"}).status_code == 400
+    r = client.get("/api/v1/auth/me", headers=efua_old)
+    assert r.status_code == 401 and "password was changed" in r.json()["detail"]
+    r = client.post("/api/v1/auth/login", json={"email": "efua@harbourview.example", "password": "brand-new-password-1"})
+    assert r.status_code == 200
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"}).status_code == 200
+    # The delivery log records the email but never the link
+    logs = client.get("/api/v1/alerts/deliveries", headers=admin).json()
+    reset_logs = [d for d in logs if d["kind"] == "reset"]
+    assert reset_logs and all("token" not in d["message"] for d in reset_logs)
+
+
+def test_newer_link_cancels_older_one(client):
+    admin = login(client, "abena@harbourview.example")
+    uid = next(u["id"] for u in client.get("/api/v1/users", headers=admin).json() if u["email"] == "abena@harbourview.example")
+    first = client.post(f"/api/v1/users/{uid}/send-reset", headers=admin).json()["link"].split("token=")[1]
+    second = client.post(f"/api/v1/users/{uid}/send-reset", headers=admin).json()["link"].split("token=")[1]
+    assert client.get(f"/api/v1/auth/reset-password/{first}").json()["valid"] is False
+    assert client.get(f"/api/v1/auth/reset-password/{second}").json()["valid"] is True
+
+
+def test_demo_requests(client):
+    ok = {"name": "Ama Boateng", "pharmacy": "Osu Community Pharmacy", "phone": "+233 24 123 4567", "email": "", "branches": "1 branch"}
+    assert client.post("/api/v1/demo-requests", json=ok).status_code == 201
+    assert client.post("/api/v1/demo-requests", json={**ok, "phone": "call me"}).status_code == 422
+    assert client.post("/api/v1/demo-requests", json={**ok, "website": "http://spam.example"}).status_code == 201  # honeypot
+
+    codes = [client.post("/api/v1/demo-requests", json=ok).status_code for _ in range(5)]
+    # The honeypot and the invalid request don't count toward the limit of 5 an hour
+    assert codes == [201, 201, 201, 201, 429]

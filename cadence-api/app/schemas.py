@@ -140,6 +140,50 @@ class PasswordChange(BaseModel):
     next: str = Field(min_length=10, max_length=200)
 
 
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    password: str = Field(min_length=10, max_length=200)
+
+
+class ResetCheckOut(CamelModel):
+    valid: bool
+    name: str = ""
+    email: str = ""
+
+
+class ResetLinkOut(CamelModel):
+    status: Literal["sent", "mock", "failed"]
+    detail: str = ""
+    email: str
+    # Only returned when the email wasn't actually delivered, so the admin can pass the link on in person.
+    link: str | None = None
+    expires_minutes: int
+
+
+# ---------- Demo requests (public website) ----------
+class DemoRequestIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    pharmacy: str = Field(min_length=2, max_length=160)
+    phone: str = Field(min_length=7, max_length=40, pattern=r"^[0-9+()\-\s]{7,40}$")
+    email: EmailStr | None = None
+    branches: str = Field(default="", max_length=40)
+    message: str = Field(default="", max_length=1000)
+    website: str = Field(default="", max_length=200)  # honeypot: real people never see or fill this
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def blank_email(cls, v):
+        return v or None
+
+
+class DemoRequestOut(CamelModel):
+    ok: bool = True
+
+
 # ---------- Analytics ----------
 class MonthOut(BaseModel):
     label: str

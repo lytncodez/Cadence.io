@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
   LuArrowRight, LuCheck, LuMessageSquare, LuSparkles, LuLayers, LuScanLine, LuBell, LuUpload, LuPercent, LuCoins,
-  LuShieldCheck, LuMinus, LuMenu, LuX, LuCircleCheck, LuStore,
+  LuShieldCheck, LuMinus, LuMenu, LuX, LuCircleCheck, LuStore, LuCircleAlert,
 } from "react-icons/lu";
 import { Avatar, Button, Field, Input, Logo, StatusPill, buttonClass } from "@/components/ui/primitives";
 import { Sparkline } from "@/components/charts";
@@ -13,7 +13,8 @@ import { prefersReducedMotion } from "@/lib/hooks";
 import { useCurrentUser } from "@/lib/api";
 import { statusFor } from "@/lib/analytics";
 import { Link } from "@/lib/router";
-import { cn, storage } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { submitDemoRequest } from "@/lib/features";
 import type { Status } from "@/lib/types";
 
 const NAV = [["#tour", "Product tour"], ["#rhythm", "Expiry bands"], ["#features", "Features"], ["#roles", "For your team"], ["#faq", "FAQ"]] as const;
@@ -362,8 +363,9 @@ const demoSchema = z.object({
   name: z.string().trim().min(2, "Add your name"),
   pharmacy: z.string().trim().min(2, "Add your pharmacy's name"),
   phone: z.string().trim().regex(/^\+?\d[\d\s]{7,}$/, "Enter the number in +233 format"),
-  email: z.union([z.literal(""), z.string().email("That email doesn't look right")]),
+  email: z.union([z.literal(""), z.string().trim().email("That email doesn't look right")]),
   branches: z.string(),
+  message: z.string().trim().max(1000, "Keep it under 1,000 characters"),
 });
 type Demo = z.infer<typeof demoSchema>;
 
@@ -375,11 +377,14 @@ function FaqDemo() {
     ["Can it run across more than one branch?", "Each pharmacy account has its own stock, users and alerts. Tell us about your branches when you book a demo."],
     ["What happens to our existing records?", "Import your Excel or CSV list on day one. Rows matching an existing barcode and batch update instead of duplicating."],
   ];
-  const [f, setF] = useState<Demo>({ name: "", pharmacy: "", phone: "", email: "", branches: "1 branch" });
+  const [f, setF] = useState<Demo>({ name: "", pharmacy: "", phone: "", email: "", branches: "1 branch", message: "" });
+  const [trap, setTrap] = useState(""); // honeypot, hidden from people
+  const [sending, setSending] = useState(false);
+  const [sendErr, setSendErr] = useState("");
   const [errors, setErrors] = useState<Partial<Record<keyof Demo, string>>>({});
   const [done, setDone] = useState<Demo | null>(null);
-  const set = (k: keyof Demo) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
-  function submit(e: React.FormEvent) {
+  const set = (k: keyof Demo) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => { setF((p) => ({ ...p, [k]: e.target.value })); setErrors((x) => ({ ...x, [k]: undefined })); };
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     const r = demoSchema.safeParse(f);
     if (!r.success) {
@@ -387,9 +392,10 @@ function FaqDemo() {
       r.error.issues.forEach((i) => { const k = i.path[0] as keyof Demo; errs[k] ??= i.message; });
       setErrors(errs); return;
     }
-    // Phase 2: POST to the API's /demo-requests endpoint. Until then the request stays in this browser.
-    storage.set("demoRequests", [...storage.get<Demo[]>("demoRequests", []), { ...r.data, at: new Date().toISOString() }]);
-    setErrors({}); setDone(r.data);
+    setErrors({}); setSendErr(""); setSending(true);
+    try { await submitDemoRequest({ ...r.data, website: trap }); setDone(r.data); }
+    catch (x) { setSendErr((x as Error).message.startsWith("Can't reach") ? "We couldn't send that just now. Check your connection and try again." : (x as Error).message); }
+    finally { setSending(false); }
   }
   return (
     <section id="faq" className="scroll-mt-20 border-t border-line bg-surface py-24">
@@ -414,10 +420,10 @@ function FaqDemo() {
           {done ? (
             <div role="status" className="mt-7 flex animate-fade-up gap-3 rounded-2xl bg-safe-soft p-5 text-safe-ink">
               <LuCircleCheck className="mt-0.5 size-5 shrink-0" />
-              <p>Thanks, {done.name.split(" ")[0]}. Your request for <b>{done.pharmacy}</b> is saved. Requests reach the Cadence team once the API is connected.</p>
+              <p>Thanks, {done.name.split(" ")[0]}. We've got your request for <b>{done.pharmacy}</b> and will call {done.phone} within one working day to book a time.</p>
             </div>
           ) : (
-            <form onSubmit={submit} noValidate className="mt-7 grid gap-4 sm:grid-cols-2">
+            <form onSubmit={submit} noValidate className="relative mt-7 grid gap-4 sm:grid-cols-2">
               <Field label="Your name" htmlFor="d-name" error={errors.name}><Input id="d-name" autoComplete="name" value={f.name} onChange={set("name")} invalid={!!errors.name} /></Field>
               <Field label="Pharmacy" htmlFor="d-ph" error={errors.pharmacy}><Input id="d-ph" autoComplete="organization" value={f.pharmacy} onChange={set("pharmacy")} invalid={!!errors.pharmacy} /></Field>
               <Field label="Phone" htmlFor="d-phone" error={errors.phone}><Input id="d-phone" inputMode="tel" placeholder="+233 …" value={f.phone} onChange={set("phone")} invalid={!!errors.phone} /></Field>
@@ -427,7 +433,15 @@ function FaqDemo() {
                   {["1 branch", "2–5 branches", "6 or more"].map((b) => <option key={b}>{b}</option>)}
                 </select>
               </Field>
-              <Button type="submit" variant="primary" size="lg" className="sm:col-span-2">Request my demo<LuArrowRight /></Button>
+              <Field label="Anything we should know? (optional)" htmlFor="d-msg" error={errors.message} className="sm:col-span-2">
+                <textarea id="d-msg" rows={3} value={f.message} onChange={set("message")} placeholder="e.g. We use an Excel sheet today and want SMS alerts for two branches." className="rounded-xl border border-line bg-surface px-3 py-2.5 text-sm placeholder:text-muted focus:border-brand focus:ring-4 focus:ring-[var(--ring)] focus:outline-none" />
+              </Field>
+              <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
+                <label htmlFor="d-web">Website</label><input id="d-web" tabIndex={-1} autoComplete="off" value={trap} onChange={(e) => setTrap(e.target.value)} />
+              </div>
+              {sendErr && <p role="alert" className="flex items-start gap-2 rounded-xl bg-critical-soft px-3.5 py-3 text-sm text-critical-ink sm:col-span-2"><LuCircleAlert className="mt-0.5 size-4 shrink-0" />{sendErr}</p>}
+              <Button type="submit" variant="primary" size="lg" loading={sending} className="sm:col-span-2">Request my demo<LuArrowRight /></Button>
+              <p className="text-xs text-muted sm:col-span-2">We only use these details to arrange your demo.</p>
             </form>
           )}
         </div>

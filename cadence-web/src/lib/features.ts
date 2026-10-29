@@ -12,7 +12,7 @@ export interface NotifySettings {
   smsEnabled: boolean; smsNumbers: string; emailEnabled: boolean; email: string; digestTime: string;
   onExpired: boolean; onCritical: boolean; onSoon: boolean; onLowStock: boolean;
 }
-export interface Delivery { id: string; channel: "sms" | "email"; recipient: string; subject: string; message: string; status: "sent" | "mock" | "failed"; error: string; kind: "digest" | "test"; createdAt: string }
+export interface Delivery { id: string; channel: "sms" | "email"; recipient: string; subject: string; message: string; status: "sent" | "mock" | "failed"; error: string; kind: "digest" | "test" | "reset"; createdAt: string }
 export interface SendResult { channel: "sms" | "email"; status: "sent" | "mock" | "failed"; detail: string }
 export type ItemInput = Omit<Item, "id" | "soldThisMonth" | "reorderLevel"> & { reorderLevel?: number; soldThisMonth?: number };
 export interface ParseResult { total: number; rows: ItemInput[]; errors: { row: number; error: string }[] }
@@ -320,3 +320,12 @@ export async function savePharmacy(data: { name: string; location: string; licen
   set({ pharmacy: { name: data.name, location: data.location, licenceNo: data.licenceNo }, thresholds: { criticalMax: data.criticalDays, soonMax: data.soonDays } }, ["pharmacy", "thresholds"]);
 }
 export const daysLeftLabel = (iso: string) => { const d = daysUntil(iso); return d <= 0 ? "expired" : `${d}d`; };
+
+/* ---------------- Website: Book a demo ---------------- */
+export interface DemoRequestInput { name: string; pharmacy: string; phone: string; email: string; branches: string; message: string; website: string }
+/** Live mode posts to the API (no sign-in needed), which stores it and notifies the Cadence team. Demo mode keeps it in this browser. */
+export async function submitDemoRequest(d: DemoRequestInput) {
+  if (!USE_MOCK) { await http("POST", "/demo-requests", d); return; }
+  await delay(600);
+  if (!d.website) storage.set("demoRequests", [...storage.get<DemoRequestInput[]>("demoRequests", []), { ...d, at: new Date().toISOString() }]);
+}

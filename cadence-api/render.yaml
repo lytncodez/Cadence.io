@@ -43,3 +43,9 @@ services:
         sync: false
       - key: CRON_SECRET
         generateValue: true
+      - key: APP_URL
+        sync: false
+      - key: DEMO_NOTIFY_EMAIL
+        sync: false
+      - key: DEMO_NOTIFY_SMS
+        sync: false

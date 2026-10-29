@@ -11,11 +11,11 @@ export function Modal({ open, onClose, title, description, children, footer, siz
   return (
     <Dialog open={open} onClose={onClose} className="relative z-50">
       <DialogBackdrop transition className="fixed inset-0 bg-[#050a18]/55 backdrop-blur-[2px] transition duration-200 data-closed:opacity-0" />
-      <div className="fixed inset-0 grid place-items-center overflow-y-auto p-4">
+      <div className="fixed inset-0 grid grid-cols-[minmax(0,1fr)] place-items-center overflow-y-auto p-4">
         <DialogPanel
           transition
           className={cn(
-            "w-full rounded-3xl border border-line bg-surface shadow-float transition duration-200 ease-out data-closed:translate-y-2 data-closed:scale-[.98] data-closed:opacity-0",
+            "w-full min-w-0 rounded-3xl border border-line bg-surface shadow-float transition duration-200 ease-out data-closed:translate-y-2 data-closed:scale-[.98] data-closed:opacity-0",
             size === "sm" ? "max-w-md" : size === "lg" ? "max-w-2xl" : "max-w-xl",
           )}
         >

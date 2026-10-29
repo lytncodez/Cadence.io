@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 
+    # Public address of the web app, used in password-reset links (no trailing slash).
+    app_url: str = "http://localhost:5173"
+    reset_link_minutes: int = 60
+    # Where "Book a demo" requests from the website are sent (leave blank to only store them).
+    demo_notify_email: str = ""
+    demo_notify_sms: str = ""
+
     # Shared secret for an external cron (e.g. cron-job.org) to trigger the daily digest.
     cron_secret: str = ""
 

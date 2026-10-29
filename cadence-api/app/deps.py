@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_db
 from .models import Role, User
-from .security import decode_token
+from .security import decode_token, password_version
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -29,6 +29,9 @@ async def current_user(
     user = await db.get(User, user_id)
     if not user or user.status != "Active":
         raise unauthorised
+    # A password reset signs out every device that was logged in before it.
+    if payload.get("pv", 0) != password_version(user.password_changed_at):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your password was changed. Log in again.", headers={"WWW-Authenticate": "Bearer"})
     return user
 
 

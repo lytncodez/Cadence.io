@@ -11,9 +11,11 @@ import Profile from "@/pages/Profile";
 import Insights from "@/pages/Insights";
 import Alerts from "@/pages/Alerts";
 import Settings from "@/pages/Settings";
+import ResetPassword from "@/pages/ResetPassword";
 
 /*  /            public website
-    /login       sign in
+    /login       sign in (and "forgot password")
+    /reset-password?token=…   set a new password from an emailed link
     /app/...     the dashboard (signed-in only)  */
 export default function App() {
   return (
@@ -43,6 +45,7 @@ function Routes() {
 
   if (p === "/") return <Website />;
   if (p === "/login") return user ? null : <Login />;
+  if (p === "/reset-password") return <ResetPassword />;
   if (!inApp) return <Website />;
   if (!user) return null;
   if (!ready) return <HexLoader label="Loading your pharmacy" />;

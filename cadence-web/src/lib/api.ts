@@ -65,6 +65,23 @@ export async function http<T>(method: string, path: string, body?: unknown): Pro
 }
 
 /* ---------------- Auth ---------------- */
+// Demo mode keeps per-user passwords in this browser so reset and change-password can be tried end to end.
+const mockPasswords = (): Record<string, string> => storage.get(V + "passwords", {});
+const setMockPassword = (id: string, pw: string) => storage.set(V + "passwords", { ...mockPasswords(), [id]: pw });
+export const demoPassword = (userId: string) => mockPasswords()[userId] ?? DEMO_PASSWORD;
+// Stored in this browser so the demo link still works when opened in a new tab.
+const mockResets = {
+  all: () => storage.get<Record<string, { userId: string; expires: number }>>(V + "resets", {}),
+  get(t: string) { return this.all()[t]; },
+  set(t: string, v: { userId: string; expires: number }) { storage.set(V + "resets", { ...this.all(), [t]: v }); },
+  delete(t: string) { const a = this.all(); delete a[t]; storage.set(V + "resets", a); },
+  clearUser(id: string) { storage.set(V + "resets", Object.fromEntries(Object.entries(this.all()).filter(([, v]) => v.userId !== id))); },
+};
+const newToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
+export const resetLink = (token: string) => `${location.origin}${import.meta.env.VITE_ROUTER === "hash" ? location.pathname + "#" : ""}/reset-password?token=${token}`;
+export interface ResetCheck { valid: boolean; name: string; email: string }
+export interface ResetLinkResult { status: "sent" | "mock" | "failed"; detail: string; email: string; link: string | null; expiresMinutes: number }
+
 export const auth = {
   async login(email: string, password: string) {
     email = email.trim().toLowerCase();
@@ -76,13 +93,40 @@ export const auth = {
     }
     await delay(650);
     const u = state.users.find((x) => x.email.toLowerCase() === email);
-    if (!u || password !== DEMO_PASSWORD) throw new Error("That email and password don't match an account.");
+    if (!u || password !== demoPassword(u.id)) throw new Error("That email and password don't match an account.");
     if (u.status !== "Active") throw new Error("This account hasn't been activated yet. Ask your admin to resend the invite.");
     const now = todayISO() + "T" + new Date().toTimeString().slice(0, 5);
     set({ users: state.users.map((x) => (x.id === u.id ? { ...x, lastLogin: now } : x)), session: { userId: u.id, token: "mock-" + u.id } }, ["users", "session"]);
     return u;
   },
   logout() { set({ session: null }, ["session"]); },
+
+  /** Always resolves the same way whether or not the email has an account. Demo mode also returns the link, since no email is sent. */
+  async forgotPassword(email: string): Promise<{ demoLink?: string }> {
+    email = email.trim().toLowerCase();
+    if (!USE_MOCK) { await http("POST", "/auth/forgot-password", { email }); return {}; }
+    await delay(600);
+    const u = state.users.find((x) => x.email.toLowerCase() === email && x.status === "Active");
+    if (!u) return {};
+    const token = newToken();
+    mockResets.clearUser(u.id);
+    mockResets.set(token, { userId: u.id, expires: Date.now() + 60 * 60_000 });
+    return { demoLink: resetLink(token) };
+  },
+  async checkReset(token: string): Promise<ResetCheck> {
+    if (!USE_MOCK) return http<ResetCheck>("GET", `/auth/reset-password/${encodeURIComponent(token)}`);
+    await delay(300);
+    const r = mockResets.get(token), u = r && r.expires > Date.now() ? state.users.find((x) => x.id === r.userId) : undefined;
+    return u ? { valid: true, name: u.name.split(" ")[0], email: u.email } : { valid: false, name: "", email: "" };
+  },
+  async resetPassword(token: string, password: string) {
+    if (!USE_MOCK) { await http("POST", "/auth/reset-password", { token, password }); set({ session: null }, ["session"]); return; }
+    await delay(500);
+    const r = mockResets.get(token);
+    if (!r || r.expires < Date.now()) throw new Error("This reset link has expired or was already used. Ask for a new one.");
+    setMockPassword(r.userId, password); mockResets.delete(token);
+    set({ session: null }, ["session"]);
+  },
 };
 export function useCurrentUser(): User | null {
   return useStore((s) => (s.session ? s.users.find((u) => u.id === s.session!.userId) ?? s.session.user ?? null : null));
@@ -141,10 +185,22 @@ export const api = {
   async changePassword(current: string, next: string) {
     if (!USE_MOCK) return http("POST", "/auth/change-password", { current, next });
     await delay(400);
-    if (current !== DEMO_PASSWORD) throw new Error("Your current password is incorrect.");
+    const id = state.session?.userId ?? "";
+    if (current !== demoPassword(id)) throw new Error("Your current password is incorrect.");
+    setMockPassword(id, next);
+  },
+  /** Admin: email a team member a link to set a new password. If the email wasn't delivered, the link comes back to share in person. */
+  async sendReset(userId: string): Promise<ResetLinkResult> {
+    if (!USE_MOCK) return http<ResetLinkResult>("POST", `/users/${userId}/send-reset`);
+    await delay(500);
+    const u = state.users.find((x) => x.id === userId)!;
+    const token = newToken();
+    mockResets.clearUser(userId);
+    mockResets.set(token, { userId, expires: Date.now() + 60 * 60_000 });
+    return { status: "mock", detail: "", email: u.email, link: resetLink(token), expiresMinutes: 60 };
   },
   resetDemo() {
-    ["items", "users", "roles", "thresholds", "pharmacy", "notify", "deliveries", "alertReads"].forEach((k) => storage.remove(V + k));
+    ["items", "users", "roles", "thresholds", "pharmacy", "notify", "deliveries", "alertReads", "passwords"].forEach((k) => storage.remove(V + k));
     set({ items: seedItems(), users: seedUsers(), roles: seedRoles(), thresholds: DEFAULT_THRESHOLDS, pharmacy: PHARMACY });
   },
 };

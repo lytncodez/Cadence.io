@@ -62,6 +62,8 @@ class User(Base):
     photo: Mapped[str] = mapped_column(Text, default="")  # data URL for now; move to object storage later
     joined: Mapped[date] = mapped_column(Date, default=date.today)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set when a password is reset; sign-in tokens issued before this stop working.
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -139,3 +141,30 @@ class NotificationLog(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     kind: Mapped[str] = mapped_column(String(20), default="digest")  # digest | test
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class PasswordReset(Base):
+    """One-time reset link. Only a SHA-256 of the token is stored, so a database leak can't be used to reset passwords."""
+    __tablename__ = "password_resets"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    requested_by: Mapped[str] = mapped_column(String(20), default="self")  # self | admin
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class DemoRequest(Base):
+    """A "Book a demo" request from the public website. Not tied to any pharmacy."""
+    __tablename__ = "demo_requests"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(120))
+    pharmacy: Mapped[str] = mapped_column(String(160))
+    phone: Mapped[str] = mapped_column(String(40))
+    email: Mapped[str] = mapped_column(String(254), default="")
+    branches: Mapped[str] = mapped_column(String(40), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="new")  # new | contacted | booked | closed
+    notified: Mapped[str] = mapped_column(String(200), default="")  # e.g. "email:sent sms:mock"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
