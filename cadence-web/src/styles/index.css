@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+/* Dark mode follows the .dark class set by the theme switcher (system / light / dark). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Cadence design tokens
+   Ground: cool paper white / deep night navy. Brand: the logo's royal blue.
+   Expiry semantics (expired · critical · soon · safe) are separate from brand.
+   --------------------------------------------------------------------------- */
+:root {
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface-2: #f8fafd;
+  --sunken: #edf1f8;
+  --line: #e2e7f1;
+  --line-strong: #cdd5e5;
+  --ink: #0a1430;
+  --ink-2: #3a4665;
+  --muted: #6a7591;
+  --brand: #1e4fd8;
+  --brand-hover: #1843bd;
+  --brand-soft: #e7eefe;
+  --brand-ink: #1a45bf;
+  --on-brand: #ffffff;
+  --navy: #0a1640;
+
+  --expired: #6b7489;  --expired-soft: #e9ebf1;  --expired-ink: #4f586c;
+  --critical: #e0453f; --critical-soft: #fde8e7; --critical-ink: #b42a26;
+  --soon: #eaa300;     --soon-soft: #fff2d3;     --soon-ink: #8a5800;
+  --safe: #16a05a;     --safe-soft: #dcf5e7;     --safe-ink: #10703f;
+  --violet: #7c5ce8;
+
+  --ring: color-mix(in oklab, var(--brand) 35%, transparent);
+  --shadow-sm: 0 1px 2px rgb(10 20 48 / .05);
+  --shadow-md: 0 1px 2px rgb(10 20 48 / .04), 0 6px 20px -4px rgb(10 20 48 / .08);
+  --shadow-lg: 0 2px 4px rgb(10 20 48 / .04), 0 24px 56px -12px rgb(14 42 128 / .22);
+  color-scheme: light;
+}
+.dark {
+  --bg: #060b18;
+  --surface: #0d1427;
+  --surface-2: #111a30;
+  --sunken: #0a1021;
+  --line: #1c2640;
+  --line-strong: #2a3655;
+  --ink: #e9eefa;
+  --ink-2: #b4bfd8;
+  --muted: #8390ad;
+  --brand: #5d89f7;
+  --brand-hover: #7a9ffa;
+  --brand-soft: #142347;
+  --brand-ink: #a9c1ff;
+  --on-brand: #06102a;
+  --navy: #0a1433;
+
+  --expired: #9aa3b8;  --expired-soft: #222b3f;  --expired-ink: #b8c0d2;
+  --critical: #ff6f69; --critical-soft: #3a1b22; --critical-ink: #ff9e99;
+  --soon: #f5b83d;     --soon-soft: #3a2d12;     --soon-ink: #ffcf6b;
+  --safe: #3fd486;     --safe-soft: #12332a;     --safe-ink: #6fe3a5;
+  --violet: #a68cff;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
+  --shadow-md: 0 1px 2px rgb(0 0 0 / .4), 0 8px 24px -6px rgb(0 0 0 / .5);
+  --shadow-lg: 0 2px 4px rgb(0 0 0 / .4), 0 28px 60px -12px rgb(0 0 0 / .7);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-on-brand: var(--on-brand);
+  --color-navy: var(--navy);
+  --color-violet: var(--violet);
+  --color-expired: var(--expired);
+  --color-expired-soft: var(--expired-soft);
+  --color-expired-ink: var(--expired-ink);
+  --color-critical: var(--critical);
+  --color-critical-soft: var(--critical-soft);
+  --color-critical-ink: var(--critical-ink);
+  --color-soon: var(--soon);
+  --color-soon-soft: var(--soon-soft);
+  --color-soon-ink: var(--soon-ink);
+  --color-safe: var(--safe);
+  --color-safe-soft: var(--safe-soft);
+  --color-safe-ink: var(--safe-ink);
+
+  --font-display: "Bricolage Grotesque", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  --shadow-card: var(--shadow-md);
+  --shadow-float: var(--shadow-lg);
+  --shadow-hair: var(--shadow-sm);
+
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+  --radius-3xl: 24px;
+
+  --animate-fade-up: fade-up .45s cubic-bezier(.2,.7,.2,1) both;
+  --animate-scale-in: scale-in .2s cubic-bezier(.2,.7,.2,1) both;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+  --animate-hex-spin: hex-spin 1.2s cubic-bezier(.6,0,.4,1) infinite;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-pulse-ring: pulse-ring 2s ease-out infinite;
+}
+
+@keyframes fade-up { from { opacity: 0; transform: translateY(8px); } }
+@keyframes scale-in { from { opacity: 0; transform: scale(.97); } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes hex-spin { 0% { transform: rotate(0); } 60%, 100% { transform: rotate(120deg); } }
+@keyframes float { 50% { transform: translateY(-6px); } }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--critical) 55%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; text-wrap: balance; }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 6px; }
+  ::selection { background: color-mix(in oklab, var(--brand) 25%, transparent); }
+  * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+}
+
+@layer components {
+  /* Paper grain for large brand surfaces. */
+  .grain { position: relative; isolation: isolate; }
+  .grain::after {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .07; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  /* Hexagon lattice echoing the logo. */
+  .hex-lattice {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cpath d='M28 0l28 16v32L28 64 0 48V16zM28 64v33M0 48l-28 16M56 48l28 16' fill='none' stroke='%23ffffff' stroke-opacity='.07'/%3E%3C/svg%3E");
+    background-size: 56px 97px;
+  }
+  .hex-lattice-ink {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cpath d='M28 0l28 16v32L28 64 0 48V16zM28 64v33' fill='none' stroke='%231e4fd8' stroke-opacity='.08'/%3E%3C/svg%3E");
+    background-size: 56px 97px;
+  }
+  .mesh-brand {
+    background:
+      radial-gradient(60% 80% at 15% 10%, color-mix(in oklab, #5d89f7 55%, transparent), transparent 60%),
+      radial-gradient(50% 60% at 90% 20%, color-mix(in oklab, #7c5ce8 45%, transparent), transparent 65%),
+      radial-gradient(70% 70% at 60% 110%, color-mix(in oklab, #1e4fd8 70%, transparent), transparent 70%),
+      #0a1640;
+  }
+  .glass {
+    background: color-mix(in oklab, var(--surface) 72%, transparent);
+    backdrop-filter: saturate(1.6) blur(14px);
+    -webkit-backdrop-filter: saturate(1.6) blur(14px);
+  }
+  .skeleton {
+    background: linear-gradient(90deg, var(--sunken) 0%, var(--surface-2) 50%, var(--sunken) 100%);
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+    border-radius: 8px;
+  }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .hex-clip { clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}

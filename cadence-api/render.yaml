@@ -1,0 +1,21 @@
+# Render Blueprint: Render → New → Blueprint → pick this repo.
+# The database lives on Neon; paste its connection string into DATABASE_URL when Render asks.
+services:
+  - type: web
+    name: cadence-api
+    runtime: docker
+    plan: free
+    region: frankfurt          # closest Render region to Ghana; match your Neon region
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false            # set in the dashboard (Neon pooled connection string)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_MINUTES
+        value: "720"
+      - key: ALLOWED_ORIGINS
+        sync: false            # e.g. https://cadence-web.vercel.app,http://localhost:5173
+      - key: SEED_PASSWORD
+        sync: false
