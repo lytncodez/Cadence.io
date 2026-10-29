@@ -32,7 +32,7 @@ export default function Profile({ userId }: { userId?: string }) {
 
   return (
     <AppShell title={self ? "My profile" : u.name}>
-      {viewingOther && <Link to="/settings" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-ink hover:underline"><LuArrowLeft className="size-4" />Back to team</Link>}
+      {viewingOther && <Link to="/app/settings" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-ink hover:underline"><LuArrowLeft className="size-4" />Back to team</Link>}
 
       {/* Identity header */}
       <Card className="overflow-hidden">
@@ -220,7 +220,7 @@ function EditProfile({ open, onClose, user, isAdmin }: { open: boolean; onClose:
   );
 }
 
-function ChangePassword({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ChangePassword({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
   const [cur, setCur] = useState(""); const [nw, setNw] = useState(""); const [rep, setRep] = useState("");
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);

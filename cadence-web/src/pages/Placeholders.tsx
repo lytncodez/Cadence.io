@@ -22,7 +22,7 @@ export function ComingSoon({ kind }: { kind: "insights" | "alerts" }) {
           <ul className="mt-6 grid gap-2 text-left text-sm">
             {meta.points.map((p) => <li key={p} className="flex items-center gap-2.5"><span className="size-1.5 rounded-full bg-brand" />{p}</li>)}
           </ul>
-          <Link to="/" className={cn(buttonClass({ variant: "primary" }), "mt-8")}>Back to overview<LuArrowRight /></Link>
+          <Link to="/app" className={cn(buttonClass({ variant: "primary" }), "mt-8")}>Back to overview<LuArrowRight /></Link>
         </div>
       </Card>
     </AppShell>
@@ -43,7 +43,7 @@ export function Team() {
         <ul className="grid gap-3 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-4">
           {users.map((u, i) => (
             <li key={u.id} className="animate-fade-up" style={{ animationDelay: `${i * 50}ms` }}>
-              <Link to={`/profile/${u.id}`} className="group flex h-full flex-col items-center gap-3 rounded-2xl border border-line p-5 text-center transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-card">
+              <Link to={`/app/profile/${u.id}`} className="group flex h-full flex-col items-center gap-3 rounded-2xl border border-line p-5 text-center transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-card">
                 <Avatar name={u.name} photo={u.photo} size={64} />
                 <div><p className="font-semibold">{u.name}</p><p className="text-xs text-muted">{u.position}</p></div>
                 <div className="flex gap-1.5">

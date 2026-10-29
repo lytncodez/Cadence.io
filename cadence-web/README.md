@@ -8,6 +8,7 @@ npm install
 cp .env.example .env.local   # optional; mock mode is the default
 npm run dev                  # http://localhost:5173
 ```
+Routes: `/` website · `/login` sign in · `/app` dashboard.
 Demo accounts (mock mode, password `cadence2026`): Abena Mensah (Admin), Kojo Asante (Pharmacist), Efua Owusu (Dispenser).
 
 ## Stack
@@ -27,8 +28,10 @@ src/
   lib/                     api (mock + live), analytics, router, theme, hooks, types, seed data
   components/ui/           Button, Input, Field, Card, StatusPill, Avatar (hexagon), Modal, Drawer, Toasts
   components/layout/       AppShell (sidebar, top bar, mobile tab bar), CommandPalette (⌘K)
+  components/site/         website product tour and motion helpers (Reveal, CountUp, Marquee)
   components/charts.tsx    Sparkline, RevenueChart, StatusDonut, ExpiryHeatmap
-  pages/                   Login, Overview, Inventory, Profile, Team, coming-soon pages
+  lib/features.ts          alerts, SMS/email delivery, AI insights, CSV/Excel import, pharmacy settings
+  pages/                   Website, Login, Overview, Inventory, Insights, Alerts, Settings, Profile
 ```
 
 ## Keyboard
@@ -50,11 +53,16 @@ Set `VITE_USE_MOCK=false` and `VITE_API_URL`. The app expects:
 | Batches | `GET/POST /items`, `PATCH/DELETE /items/{id}` |
 | Team | `GET /users`, `PATCH /users/{id}`, `GET /roles` |
 | Sales history | `GET /analytics/monthly` → `[{ label, year, revenue, cost }]` |
+| AI insights | `POST /ai/chat` `{ message, history, datasetName?, rows? }` → `{ kind, text }` · `GET /ai/status` |
+| Analyse a file | `POST /items/parse` (multipart `file`) → `{ total, rows, errors }`, nothing saved |
+| Alerts | `GET /alerts`, `POST /alerts/read`, `GET/PUT /alerts/settings`, `POST /alerts/test-sms`, `/alerts/test-email`, `/alerts/send-digest`, `GET /alerts/deliveries` |
+| Import | `POST /items/import?dry_run=true\|false` (multipart `file`) |
+| Pharmacy | `GET/PATCH /pharmacy` |
 
 Field names follow `src/lib/types.ts`.
 
 ## Roadmap
 - **Phase 1 (this)**: design system, shell, login, overview, inventory, profile, team.
 - **Phase 2**: database on Neon + FastAPI on Render, real auth.
-- **Phase 3**: AI Insights, Alerts, full Settings.
-- **Phase 4**: marketing website on Next.js.
+- **Phase 3**: AI Insights, Alerts with SMS/email, CSV/Excel import, pharmacy settings. ✓
+- **Phase 4**: website polish (pricing, blog, SEO). The website itself is already at `/`.

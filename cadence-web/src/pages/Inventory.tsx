@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
-import { LuSearch, LuPlus, LuScanLine, LuEllipsis, LuPencil, LuTrash2, LuLayers, LuChevronLeft, LuChevronRight, LuArrowUp, LuArrowDown, LuBarcode, LuX, LuPackage, LuTruck, LuCoins } from "react-icons/lu";
+import { LuSearch, LuPlus, LuScanLine, LuEllipsis, LuPencil, LuTrash2, LuLayers, LuChevronLeft, LuChevronRight, LuArrowUp, LuArrowDown, LuBarcode, LuX, LuPackage, LuTruck, LuCoins, LuUpload } from "react-icons/lu";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge, Button, Card, EmptyState, Input, StatusPill, dot } from "@/components/ui/primitives";
 import { Drawer, Modal, useToast } from "@/components/ui/overlay";
 import { AddStockDialog } from "@/components/AddStockDialog";
+import { ImportDialog } from "@/components/ImportDialog";
 import { api, useCan, useStore } from "@/lib/api";
 import { enrich, STATUS_META, STATUS_ORDER } from "@/lib/analytics";
 import { navigate, usePath } from "@/lib/router";
@@ -32,6 +33,7 @@ export default function Inventory() {
   const [editing, setEditing] = useState<Item | null>(null);
   const [addOpen, setAddOpen] = useState(params.get("add") === "1");
   const [scanOpen, setScanOpen] = useState(params.get("scan") === "1");
+  const [importOpen, setImportOpen] = useState(params.get("import") === "1");
 
   // Deep links (?batch=, ?status=, ?add=, ?scan=) are consumed once, then cleaned from the URL.
   useEffect(() => {
@@ -40,7 +42,8 @@ export default function Inventory() {
     if (p.get("status")) setStatus(p.get("status") as Status);
     if (p.get("add") === "1") setAddOpen(true);
     if (p.get("scan") === "1") setScanOpen(true);
-    if ([...p.keys()].length) navigate("/inventory", { replace: true });
+    if (p.get("import") === "1") setImportOpen(true);
+    if ([...p.keys()].length) navigate("/app/inventory", { replace: true });
   }, [path]);
 
   const rows = useMemo(() => items.map((i) => enrich(i, thresholds)), [items, thresholds]);
@@ -72,7 +75,7 @@ export default function Inventory() {
   async function remove(ids: string[]) {
     const removed = await api.deleteItems(ids);
     setSelected(new Set()); setDetail(null);
-    toast({ message: ids.length === 1 ? `Deleted ${removed[0]?.batch}` : `Deleted ${ids.length} batches`, action: { label: "Undo", run: () => api.restoreItems(removed) } });
+    toast({ message: ids.length === 1 ? `Deleted ${removed[0]?.batch}` : `Deleted ${ids.length} batches`, action: { label: "Undo", run: () => { void api.restoreItems(removed); } } });
   }
 
   const SortHead = ({ k, children, className }: { k: SortKey; children: React.ReactNode; className?: string }) => (
@@ -92,6 +95,7 @@ export default function Inventory() {
         </div>
         <div className="flex gap-2">
           <Button onClick={() => setScanOpen(true)}><LuScanLine />Scan barcode</Button>
+          {can("import") && <Button onClick={() => setImportOpen(true)}><LuUpload />Import</Button>}
           {can("edit_inventory") && <Button variant="primary" onClick={() => setAddOpen(true)}><LuPlus />Add stock</Button>}
         </div>
       </div>
@@ -198,6 +202,7 @@ export default function Inventory() {
 
       <BatchDrawer row={detailRow} rows={rows} onClose={() => setDetail(null)} onEdit={(r) => { setEditing(r); }} onDelete={(r) => remove([r.id])} onPick={setDetail} canEdit={can("edit_inventory")} canDelete={can("delete_inventory")} />
       <AddStockDialog open={addOpen || !!editing} edit={editing} onClose={() => { setAddOpen(false); setEditing(null); }} />
+      <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <ScanDialog open={scanOpen} onClose={() => setScanOpen(false)} rows={rows} onPick={(id) => { setScanOpen(false); setDetail(id); }} />
     </AppShell>
   );

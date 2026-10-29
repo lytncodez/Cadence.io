@@ -40,8 +40,8 @@ export default function Overview() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link to="/inventory?status=critical" className={cn(buttonClass({ size: "md" }), "border-white/20 bg-white/10 text-white backdrop-blur hover:bg-white/20 hover:border-white/30")}><LuTriangleAlert />Review critical</Link>
-            {can("edit_inventory") && <button onClick={() => navigate("/inventory?add=1")} className={cn(buttonClass({ size: "md" }), "border-transparent bg-white text-[#0a1640] hover:bg-white/90")}><LuPlus />Add stock</button>}
+            <Link to="/app/inventory?status=critical" className={cn(buttonClass({ size: "md" }), "border-white/20 bg-white/10 text-white backdrop-blur hover:bg-white/20 hover:border-white/30")}><LuTriangleAlert />Review critical</Link>
+            {can("edit_inventory") && <button onClick={() => navigate("/app/inventory?add=1")} className={cn(buttonClass({ size: "md" }), "border-transparent bg-white text-[#0a1640] hover:bg-white/90")}><LuPlus />Add stock</button>}
           </div>
         </div>
       </section>
@@ -57,17 +57,17 @@ export default function Overview() {
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.6fr_1fr]">
         {/* Expiry calendar */}
         <Card className="animate-fade-up [animation-delay:120ms]">
-          <CardHeader title="Expiry calendar" subtitle="What leaves the shelf over the next 14 weeks" action={<Link to="/inventory" className="flex items-center gap-1 text-sm font-medium text-brand-ink hover:underline">Inventory<LuArrowRight className="size-4" /></Link>} />
-          <div className="px-5 pb-5"><ExpiryHeatmap rows={a.rows} onPick={() => navigate("/inventory?status=critical")} /></div>
+          <CardHeader title="Expiry calendar" subtitle="What leaves the shelf over the next 14 weeks" action={<Link to="/app/inventory" className="flex items-center gap-1 text-sm font-medium text-brand-ink hover:underline">Inventory<LuArrowRight className="size-4" /></Link>} />
+          <div className="px-5 pb-5"><ExpiryHeatmap rows={a.rows} onPick={() => navigate("/app/inventory?status=critical")} /></div>
         </Card>
 
         {/* Dispense next */}
         <Card className="animate-fade-up [animation-delay:180ms]">
-          <CardHeader title="Dispense next" subtitle="First-expiry-first-out, across every product" action={<button onClick={() => navigate("/inventory?scan=1")} className={buttonClass({ variant: "soft", size: "sm" })}><LuScanLine />Scan</button>} />
+          <CardHeader title="Dispense next" subtitle="First-expiry-first-out, across every product" action={<button onClick={() => navigate("/app/inventory?scan=1")} className={buttonClass({ variant: "soft", size: "sm" })}><LuScanLine />Scan</button>} />
           <ul className="px-2 pb-3">
             {next.map((b, i) => (
               <li key={b.id}>
-                <Link to={`/inventory?batch=${b.id}`} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-sunken">
+                <Link to={`/app/inventory?batch=${b.id}`} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-sunken">
                   <span className="w-4 text-right font-mono text-xs text-muted tabular">{i + 1}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium text-ink">{b.name}</span>
@@ -102,7 +102,7 @@ export default function Overview() {
                   {a.top[0] ? <>Sales are {a.kpi.revenueDelta >= 0 ? "up" : "down"} <b>{Math.abs(a.kpi.revenueDelta).toFixed(1)}%</b> on last month, led by <b>{a.top[0].name.split(" ")[0]}</b>. </> : null}
                   <b>{money(atRisk, 0)}</b> of stock expires within {thresholds.criticalMax} days{a.lowStock.length ? <>, and <b>{a.lowStock.length} products</b> are below reorder level</> : null}.
                 </p>
-                <Link to="/insights" className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-ink hover:underline">Ask a follow-up<LuArrowRight className="size-4" /></Link>
+                <Link to="/app/insights" className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-ink hover:underline">Ask a follow-up<LuArrowRight className="size-4" /></Link>
               </div>
             </Card>
           )}

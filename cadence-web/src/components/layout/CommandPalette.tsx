@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogBackdrop, DialogPanel } from "@headlessui/react";
-import { LuSearch, LuHouse, LuPackage, LuUser, LuSparkles, LuBell, LuSettings, LuPlus, LuSun, LuMoon, LuLogOut, LuCornerDownLeft, LuPill } from "react-icons/lu";
+import { LuSearch, LuHouse, LuPackage, LuUser, LuSparkles, LuBell, LuSettings, LuPlus, LuSun, LuMoon, LuLogOut, LuCornerDownLeft, LuPill, LuUpload } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { navigate } from "@/lib/router";
 import { auth, useCan, useStore } from "@/lib/api";
@@ -20,12 +20,13 @@ export function CommandPalette({ open, onClose, onTheme, onAddStock }: { open: b
   const commands = useMemo<Cmd[]>(() => {
     const go = (p: string) => () => navigate(p);
     const base: Cmd[] = [
-      { id: "nav-home", group: "Go to", label: "Overview", icon: LuHouse, run: go("/") },
-      { id: "nav-inv", group: "Go to", label: "Inventory", icon: LuPackage, run: go("/inventory") },
-      ...(can("view_insights") ? [{ id: "nav-ai", group: "Go to", label: "AI Insights", icon: LuSparkles, run: go("/insights") }] : []),
-      { id: "nav-alerts", group: "Go to", label: "Alerts", icon: LuBell, run: go("/alerts") },
-      ...(can("manage_users") ? [{ id: "nav-set", group: "Go to", label: "Settings", icon: LuSettings, run: go("/settings") }] : []),
-      { id: "nav-me", group: "Go to", label: "My profile", icon: LuUser, run: go("/profile") },
+      { id: "nav-home", group: "Go to", label: "Overview", icon: LuHouse, run: go("/app") },
+      { id: "nav-inv", group: "Go to", label: "Inventory", icon: LuPackage, run: go("/app/inventory") },
+      ...(can("view_insights") ? [{ id: "nav-ai", group: "Go to", label: "AI Insights", icon: LuSparkles, run: go("/app/insights") }] : []),
+      { id: "nav-alerts", group: "Go to", label: "Alerts", icon: LuBell, run: go("/app/alerts") },
+      ...(can("manage_users") ? [{ id: "nav-set", group: "Go to", label: "Settings", icon: LuSettings, run: go("/app/settings") }] : []),
+      { id: "nav-me", group: "Go to", label: "My profile", icon: LuUser, run: go("/app/profile") },
+      ...(can("import") ? [{ id: "act-import", group: "Actions", label: "Import stock from CSV / Excel", icon: LuUpload, run: go("/app/inventory?import=1") }] : []),
       ...(can("edit_inventory") ? [{ id: "act-add", group: "Actions", label: "Add stock", hint: "N", icon: LuPlus, run: onAddStock }] : []),
       { id: "act-light", group: "Actions", label: "Switch to light theme", icon: LuSun, run: () => onTheme("light") },
       { id: "act-dark", group: "Actions", label: "Switch to dark theme", icon: LuMoon, run: () => onTheme("dark") },
@@ -33,7 +34,7 @@ export function CommandPalette({ open, onClose, onTheme, onAddStock }: { open: b
     ];
     const batches: Cmd[] = items.map((i) => enrich(i, thresholds)).sort((a, b) => a.days - b.days).map((b) => ({
       id: b.id, group: "Batches", label: `${b.name}`, hint: `${b.batch} · ${relDays(b.days)}`, icon: LuPill, status: b.status,
-      keywords: `${b.barcode} ${b.batch} ${b.category}`, run: () => navigate(`/inventory?batch=${b.id}`),
+      keywords: `${b.barcode} ${b.batch} ${b.category}`, run: () => navigate(`/app/inventory?batch=${b.id}`),
     }));
     return [...base, ...batches];
   }, [items, thresholds, can, onTheme, onAddStock]);

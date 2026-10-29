@@ -30,9 +30,15 @@ export function daysUntil(iso: string) {
   const [ty, tm, td] = todayISO().split("-").map(Number);
   return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86400000);
 }
-export function fmtDate(iso?: string) {
+export type DateFormat = "d MMM yyyy" | "dd/MM/yyyy" | "yyyy-MM-dd";
+let DATE_FORMAT: DateFormat = "d MMM yyyy";
+export const setDateFormat = (f: DateFormat) => { DATE_FORMAT = f; };
+export function fmtDate(iso?: string, fmt: DateFormat = DATE_FORMAT) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-").map(Number);
+  const p = (n: number) => String(n).padStart(2, "0");
+  if (fmt === "dd/MM/yyyy") return `${p(d)}/${p(m)}/${y}`;
+  if (fmt === "yyyy-MM-dd") return `${y}-${p(m)}-${p(d)}`;
   return `${d} ${MONTHS[m - 1]} ${y}`;
 }
 export function relDays(days: number) {

@@ -11,7 +11,6 @@ import { summarize } from "@/lib/analytics";
 import { useHotkey } from "@/lib/hooks";
 import { useTheme } from "@/lib/theme";
 import { cn, relDays, storage } from "@/lib/utils";
-import { PHARMACY } from "@/lib/seed";
 import type { Permission } from "@/lib/types";
 import { Avatar, Button, Kbd, Logo, StatusPill } from "@/components/ui/primitives";
 import { CommandPalette } from "./CommandPalette";
@@ -19,11 +18,11 @@ import { AddStockDialog } from "@/components/AddStockDialog";
 
 interface NavItem { to: string; label: string; icon: IconType; perm?: Permission; match: (p: string) => boolean }
 const NAV: NavItem[] = [
-  { to: "/", label: "Overview", icon: LuHouse, match: (p) => p === "/" },
-  { to: "/inventory", label: "Inventory", icon: LuPackage, match: (p) => p.startsWith("/inventory") },
-  { to: "/insights", label: "AI Insights", icon: LuSparkles, perm: "view_insights", match: (p) => p.startsWith("/insights") },
-  { to: "/alerts", label: "Alerts", icon: LuBell, match: (p) => p.startsWith("/alerts") },
-  { to: "/settings", label: "Settings", icon: LuSettings, perm: "manage_users", match: (p) => p.startsWith("/settings") },
+  { to: "/app", label: "Overview", icon: LuHouse, match: (p) => p === "/app" },
+  { to: "/app/inventory", label: "Inventory", icon: LuPackage, match: (p) => p.startsWith("/app/inventory") },
+  { to: "/app/insights", label: "AI Insights", icon: LuSparkles, perm: "view_insights", match: (p) => p.startsWith("/app/insights") },
+  { to: "/app/alerts", label: "Alerts", icon: LuBell, match: (p) => p.startsWith("/app/alerts") },
+  { to: "/app/settings", label: "Settings", icon: LuSettings, match: (p) => p.startsWith("/app/settings") },
 ];
 
 export function AppShell({ title, children }: { title: string; children: ReactNode }) {
@@ -36,12 +35,13 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
   const items = useStore((s) => s.items);
   const monthly = useStore((s) => s.monthly);
   const thresholds = useStore((s) => s.thresholds);
+  const pharmacy = useStore((s) => s.pharmacy);
   const urgent = useMemo(() => summarize(items, monthly, thresholds).rows.filter((r) => r.status === "expired" || r.status === "critical"), [items, monthly, thresholds]);
 
   useEffect(() => storage.set("sidebar.collapsed", collapsed), [collapsed]);
   useEffect(() => { document.title = `${title} · Cadence.io`; }, [title]);
   useHotkey("k", () => setCmdOpen(true), { meta: true });
-  useHotkey("/", () => setCmdOpen(true));
+  useHotkey("/app", () => setCmdOpen(true));
   useHotkey("n", () => can("edit_inventory") && setAddOpen(true));
 
   const nav = NAV.filter((n) => !n.perm || can(n.perm));
@@ -51,13 +51,13 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
       {/* Sidebar */}
       <aside className={cn("fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-line bg-surface/70 backdrop-blur-xl transition-[width] duration-300 md:flex", collapsed ? "w-[76px]" : "w-[248px]")}>
         <div className={cn("flex h-16 items-center px-5", collapsed && "justify-center px-0")}>
-          <Link to="/" aria-label="Overview"><Logo withText={!collapsed} /></Link>
+          <Link to="/app" aria-label="Overview"><Logo withText={!collapsed} /></Link>
         </div>
 
         <div className={cn("px-3", collapsed && "px-2")}>
           <div className={cn("flex items-center gap-2.5 rounded-xl border border-line bg-surface-2 p-2", collapsed && "justify-center")}>
             <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand-ink"><LuStore className="size-4" /></span>
-            {!collapsed && <span className="min-w-0"><span className="block truncate text-[13px] font-semibold">{PHARMACY.name}</span><span className="block truncate text-[11px] text-muted">{PHARMACY.location}</span></span>}
+            {!collapsed && <span className="min-w-0"><span className="block truncate text-[13px] font-semibold">{pharmacy.name}</span><span className="block truncate text-[11px] text-muted">{pharmacy.location}</span></span>}
           </div>
         </div>
 
@@ -71,7 +71,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
                 {on && <span className="absolute top-2 bottom-2 -left-3 w-1 rounded-r-full bg-brand" />}
                 <n.icon className="size-[18px] shrink-0" />
                 {!collapsed && <span className="flex-1">{n.label}</span>}
-                {n.to === "/alerts" && urgent.length > 0 && (
+                {n.to === "/app/alerts" && urgent.length > 0 && (
                   <span className={cn("grid h-5 min-w-5 place-items-center rounded-full bg-critical px-1.5 text-[11px] font-semibold text-white tabular", collapsed && "absolute top-1 right-2 h-4 min-w-4 px-1 text-[10px]")}>{urgent.length}</span>
                 )}
               </Link>
@@ -111,12 +111,12 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
 
       {/* Mobile tab bar */}
       <nav className="glass fixed inset-x-0 bottom-0 z-30 flex border-t border-line px-2 pt-1.5 pb-[max(6px,env(safe-area-inset-bottom))] md:hidden" aria-label="Main">
-        {[...nav.slice(0, 4), { to: "/profile", label: "Me", icon: LuUser, match: (p: string) => p.startsWith("/profile") }].map((n) => {
+        {[...nav.slice(0, 4), { to: "/app/profile", label: "Me", icon: LuUser, match: (p: string) => p.startsWith("/app/profile") }].map((n) => {
           const on = n.match(path);
           return (
             <Link key={n.to} to={n.to} className={cn("relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-1.5 text-[11px] font-medium text-muted", on && "text-brand-ink")}>
               <n.icon className="size-5" />{n.label}
-              {n.to === "/alerts" && urgent.length > 0 && <span className="absolute top-0.5 left-[calc(50%+4px)] grid h-4 min-w-4 place-items-center rounded-full bg-critical px-1 text-[10px] text-white">{urgent.length}</span>}
+              {n.to === "/app/alerts" && urgent.length > 0 && <span className="absolute top-0.5 left-[calc(50%+4px)] grid h-4 min-w-4 place-items-center rounded-full bg-critical px-1 text-[10px] text-white">{urgent.length}</span>}
             </Link>
           );
         })}
@@ -148,7 +148,7 @@ function UserMenu({ collapsed, compact, theme, setTheme }: { collapsed?: boolean
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{user.name}</p><p className="truncate text-xs text-muted">{user.email}</p></div>
         </div>
         <div className="mx-3 mb-1.5 flex items-center gap-1.5 rounded-lg bg-brand-soft px-2 py-1 text-[11px] font-semibold text-brand-ink"><LuShieldCheck className="size-3.5" />{user.role} · {user.position}</div>
-        <MenuItem><button onClick={() => navigate("/profile")} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm data-focus:bg-sunken"><LuUser className="size-4 text-muted" />View profile</button></MenuItem>
+        <MenuItem><button onClick={() => navigate("/app/profile")} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm data-focus:bg-sunken"><LuUser className="size-4 text-muted" />View profile</button></MenuItem>
         <div className="my-1 h-px bg-line" />
         <p className="px-3 pt-1 pb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">Theme</p>
         <div className="mx-2 mb-1 grid grid-cols-3 gap-1 rounded-xl bg-sunken p-1">
@@ -178,7 +178,7 @@ function Notifications({ urgent }: { urgent: ReturnType<typeof summarize>["rows"
         <ul className="max-h-80 overflow-y-auto p-1.5">
           {urgent.slice(0, 8).map((b) => (
             <li key={b.id}>
-              <Link to={`/inventory?batch=${b.id}`} className="flex items-start gap-3 rounded-xl px-3 py-2.5 hover:bg-sunken">
+              <Link to={`/app/inventory?batch=${b.id}`} className="flex items-start gap-3 rounded-xl px-3 py-2.5 hover:bg-sunken">
                 <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", b.status === "expired" ? "bg-expired" : "bg-critical")} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{b.name}</span>
@@ -189,7 +189,7 @@ function Notifications({ urgent }: { urgent: ReturnType<typeof summarize>["rows"
             </li>
           ))}
         </ul>
-        <Link to="/alerts" className="flex items-center justify-center gap-1.5 border-t border-line py-3 text-sm font-medium text-brand-ink hover:bg-sunken rounded-b-2xl">See all alerts<LuArrowRight className="size-4" /></Link>
+        <Link to="/app/alerts" className="flex items-center justify-center gap-1.5 border-t border-line py-3 text-sm font-medium text-brand-ink hover:bg-sunken rounded-b-2xl">See all alerts<LuArrowRight className="size-4" /></Link>
       </PopoverPanel>
     </Popover>
   );

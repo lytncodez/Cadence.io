@@ -1,12 +1,12 @@
+import { getPrefs } from "@/lib/theme";
 import { useState } from "react";
 import { LuEye, LuEyeOff, LuArrowRight, LuCircleAlert, LuInfo, LuArrowLeft } from "react-icons/lu";
 import { auth, DEMO_PASSWORD, USE_MOCK, useStore } from "@/lib/api";
-import { navigate } from "@/lib/router";
+import { Link, navigate } from "@/lib/router";
 import { Avatar, Button, Field, Input, Logo, StatusPill } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 import logoUrl from "@/assets/logo.svg";
 
-const WEBSITE_URL = import.meta.env.VITE_WEBSITE_URL || "/";
 
 export default function Login() {
   const users = useStore((s) => s.users);
@@ -23,7 +23,7 @@ export default function Login() {
     setBusy(as?.id ?? "form"); setMsg(null);
     try {
       await auth.login(em, p);
-      navigate("/", { replace: true });
+      navigate(getPrefs().startPage, { replace: true });
     } catch (err) {
       setMsg({ tone: "error", text: (err as Error).message });
       setPw(""); setBusy(false);
@@ -37,7 +37,7 @@ export default function Login() {
         <div className="hex-lattice absolute inset-0 opacity-70" />
         <img src={logoUrl} alt="" className="pointer-events-none absolute -right-24 -bottom-24 w-[420px] opacity-[.08]" />
         <div className="relative flex flex-1 flex-col justify-between gap-12 p-12">
-          <Logo onDark />
+          <Link to="/" aria-label="Cadence.io home"><Logo onDark /></Link>
           <div className="max-w-md">
             <p className="mb-4 text-xs font-semibold tracking-[.18em] text-[#a9c1ff] uppercase">Today at the counter</p>
             <h2 className="font-display text-[44px] leading-[1.04] font-bold">Your shelf, already sorted for today.</h2>
@@ -67,8 +67,8 @@ export default function Login() {
       {/* Form */}
       <main className="flex flex-col px-5 py-6 sm:px-10">
         <div className="flex items-center justify-between">
-          <span className="lg:invisible"><Logo /></span>
-          <a href={WEBSITE_URL} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-2 hover:bg-sunken"><LuArrowLeft className="size-4" />Website</a>
+          <Link to="/" className="lg:invisible" aria-label="Cadence.io home"><Logo /></Link>
+          <Link to="/" className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-2 hover:bg-sunken"><LuArrowLeft className="size-4" />Back to website</Link>
         </div>
         <div className="grid flex-1 place-items-center py-10">
           <form onSubmit={signIn} noValidate className="w-full max-w-[400px] animate-fade-up">

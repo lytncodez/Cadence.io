@@ -45,7 +45,8 @@ export function summarize(items: Item[], monthly: Month[], t?: Thresholds) {
 
   const cur = monthly[monthly.length - 1], prev = monthly[monthly.length - 2];
   const gp = cur.revenue - cur.cost, gpPrev = prev.revenue - prev.cost;
-  const pct = (a: number, b: number) => ((a - b) / b) * 100;
+  const pct = (a: number, b: number) => (b ? ((a - b) / b) * 100 : 0);
+  const mg = (g: number, r: number) => (r ? (g / r) * 100 : 0);
 
   // Units sold per week, last 8 weeks, derived from monthly totals (for sparklines).
   const weekly = monthly.slice(-2).flatMap((m, mi) => [0.92, 1.04, 0.97, 1.07].map((f, wi) => Math.round((m.revenue / 4) * f * (1 + (mi * 4 + wi) * 0.004))));
@@ -60,7 +61,7 @@ export function summarize(items: Item[], monthly: Month[], t?: Thresholds) {
     kpi: {
       revenue: cur.revenue, revenueDelta: pct(cur.revenue, prev.revenue),
       profit: gp, profitDelta: pct(gp, gpPrev),
-      margin: (gp / cur.revenue) * 100, marginDelta: (gp / cur.revenue - gpPrev / prev.revenue) * 100,
+      margin: mg(gp, cur.revenue), marginDelta: mg(gp, cur.revenue) - mg(gpPrev, prev.revenue),
     },
   };
 }

@@ -1,24 +1,54 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+import { setDateFormat, type DateFormat } from "./utils";
 
 export type ThemeChoice = "light" | "dark" | "system";
+export interface Prefs {
+  theme: ThemeChoice;
+  reduceMotion: boolean;
+  dateFormat: DateFormat;
+  startPage: "/app" | "/app/inventory" | "/app/alerts" | "/app/insights";
+}
+const DEFAULTS: Prefs = { theme: "system", reduceMotion: false, dateFormat: "d MMM yyyy", startPage: "/app" };
 
-function apply(choice: ThemeChoice) {
-  const dark = choice === "dark" || (choice === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.classList.toggle("dark", dark);
+function load(): Prefs {
+  try {
+    const raw = localStorage.getItem("cadence.prefs");
+    const theme = (localStorage.getItem("cadence.theme") as ThemeChoice) || DEFAULTS.theme;
+    return { ...DEFAULTS, ...(raw ? JSON.parse(raw) : {}), theme };
+  } catch { return DEFAULTS; }
 }
 
+let prefs = load();
+const subs = new Set<() => void>();
+const mq = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+
+function apply() {
+  const root = document.documentElement;
+  root.classList.toggle("dark", prefs.theme === "dark" || (prefs.theme === "system" && !!mq?.matches));
+  root.classList.toggle("reduce-motion", prefs.reduceMotion);
+  setDateFormat(prefs.dateFormat);
+}
+apply();
+mq?.addEventListener("change", () => { if (prefs.theme === "system") apply(); });
+
+export function setPrefs(patch: Partial<Prefs>) {
+  prefs = { ...prefs, ...patch };
+  try {
+    localStorage.setItem("cadence.theme", prefs.theme);
+    const { theme: _t, ...rest } = prefs; // eslint-disable-line @typescript-eslint/no-unused-vars
+    localStorage.setItem("cadence.prefs", JSON.stringify(rest));
+  } catch { /* storage unavailable: keep in memory */ }
+  apply();
+  subs.forEach((f) => f());
+}
+export const getPrefs = () => prefs;
+const subscribe = (f: () => void) => { subs.add(f); return () => subs.delete(f); };
+
+export function usePrefs() {
+  return useSyncExternalStore(subscribe, getPrefs, getPrefs);
+}
+/** Shared theme state: the user menu and Settings stay in sync. */
 export function useTheme() {
-  const [choice, setChoice] = useState<ThemeChoice>(() => {
-    try { return (localStorage.getItem("cadence.theme") as ThemeChoice) || "system"; } catch { return "system"; }
-  });
-  useEffect(() => {
-    apply(choice);
-    try { localStorage.setItem("cadence.theme", choice); } catch { /* ignore */ }
-    if (choice !== "system") return;
-    const mq = matchMedia("(prefers-color-scheme: dark)");
-    const on = () => apply("system");
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, [choice]);
-  return [choice, setChoice] as const;
+  const p = usePrefs();
+  return [p.theme, (t: ThemeChoice) => setPrefs({ theme: t })] as const;
 }

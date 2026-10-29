@@ -5,7 +5,7 @@ export function useCountUp(value: number, duration = 900) {
   const [shown, setShown] = useState(0);
   const from = useRef(0);
   useEffect(() => {
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduce = prefersReducedMotion();
     if (reduce) { setShown(value); from.current = value; return; }
     const start = performance.now(), a = from.current;
     let raf = 0;
@@ -49,4 +49,23 @@ export function useMediaQuery(q: string) {
     return () => mq.removeEventListener("change", on);
   }, [q]);
   return m;
+}
+
+/** True when the device or the Cadence "Reduce motion" setting asks for less animation. */
+export const prefersReducedMotion = () =>
+  matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.classList.contains("reduce-motion");
+
+/** Adds `in` to the element the first time it scrolls into view (pairs with the .reveal class). */
+export function useReveal<T extends HTMLElement>(threshold = 0.15) {
+  const ref = useRef<T>(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (prefersReducedMotion() || typeof IntersectionObserver === "undefined") { setShown(true); return; }
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setShown(true); io.disconnect(); } }, { threshold, rootMargin: "100000px 0px -8% 0px" /* anything already scrolled past counts as seen */ });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [threshold]);
+  return [ref, shown] as const;
 }
