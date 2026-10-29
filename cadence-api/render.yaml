@@ -19,3 +19,27 @@ services:
         sync: false            # e.g. https://cadence-web.vercel.app,http://localhost:5173
       - key: SEED_PASSWORD
         sync: false
+      - key: SMS_PROVIDER
+        value: mock
+      - key: SMS_SENDER_ID
+        value: Cadence
+      - key: ARKESEL_API_KEY
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: mock
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: AI_PROVIDER
+        value: mock
+      - key: AI_MODEL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true

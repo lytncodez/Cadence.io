@@ -101,3 +101,41 @@ class Sale(Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     sold_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class NotificationSettings(Base):
+    """Where and when a pharmacy's alerts are delivered."""
+    __tablename__ = "notification_settings"
+    pharmacy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pharmacies.id", ondelete="CASCADE"), primary_key=True)
+    sms_enabled: Mapped[bool] = mapped_column(default=True)
+    sms_numbers: Mapped[str] = mapped_column(String(400), default="")
+    email_enabled: Mapped[bool] = mapped_column(default=False)
+    email: Mapped[str] = mapped_column(String(254), default="")
+    digest_time: Mapped[str] = mapped_column(String(5), default="07:30")  # HH:MM, Ghana time (UTC)
+    on_expired: Mapped[bool] = mapped_column(default=True)
+    on_critical: Mapped[bool] = mapped_column(default=True)
+    on_soon: Mapped[bool] = mapped_column(default=False)
+    on_low_stock: Mapped[bool] = mapped_column(default=True)
+    last_digest_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class AlertRead(Base):
+    """Which alerts a user has marked read. Alerts themselves are computed, not stored."""
+    __tablename__ = "alert_reads"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    key: Mapped[str] = mapped_column(String(160), primary_key=True)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class NotificationLog(Base):
+    __tablename__ = "notification_log"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    pharmacy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pharmacies.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(10))  # sms | email
+    recipient: Mapped[str] = mapped_column(String(254))
+    subject: Mapped[str] = mapped_column(String(200), default="")
+    message: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10))  # sent | mock | failed
+    error: Mapped[str] = mapped_column(Text, default="")
+    kind: Mapped[str] = mapped_column(String(20), default="digest")  # digest | test
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)

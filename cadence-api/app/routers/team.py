@@ -5,9 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..deps import current_user, user_perms
+from ..deps import current_user, require, user_perms
 from ..models import Pharmacy, Role, User
-from ..schemas import PharmacyOut, RoleOut, UserOut, UserUpdate
+from ..schemas import PharmacyOut, PharmacyUpdate, RoleOut, UserOut, UserUpdate
 from ..serializers import user_out
 
 router = APIRouter(tags=["team"])
@@ -58,3 +58,16 @@ async def list_roles(user: User = Depends(current_user), db: AsyncSession = Depe
 async def get_pharmacy(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     """The signed-in user's pharmacy, including its expiry thresholds."""
     return PharmacyOut.model_validate(await db.get(Pharmacy, user.pharmacy_id))
+
+
+@router.patch("/pharmacy", response_model=PharmacyOut)
+async def update_pharmacy(body: PharmacyUpdate, user: User = Depends(require("company")), db: AsyncSession = Depends(get_db)):
+    ph = await db.get(Pharmacy, user.pharmacy_id)
+    data = body.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if v is not None:
+            setattr(ph, k, v.strip() if isinstance(v, str) else v)
+    if ph.soon_days <= ph.critical_days:
+        raise HTTPException(400, "\"Expiring soon\" must be longer than \"Critical\".")
+    await db.commit()
+    return PharmacyOut.model_validate(ph)

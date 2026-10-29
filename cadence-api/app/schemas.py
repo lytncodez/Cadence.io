@@ -23,6 +23,7 @@ class ItemBase(CamelModel):
     unit_price: float = Field(gt=0)
     supplier: str = Field(default="", max_length=120)
     reorder_level: int | None = Field(default=None, ge=0)
+    sold_this_month: int | None = Field(default=None, ge=0)  # optional; used when analysing an uploaded file
 
     @model_validator(mode="after")
     def price_not_below_cost(self):
@@ -145,3 +146,110 @@ class MonthOut(BaseModel):
     year: int
     revenue: float
     cost: float
+
+
+# ---------- Pharmacy settings ----------
+class PharmacyUpdate(CamelModel):
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    location: str | None = Field(default=None, max_length=160)
+    licence_no: str | None = Field(default=None, max_length=60)
+    critical_days: int | None = Field(default=None, ge=1, le=365)
+    soon_days: int | None = Field(default=None, ge=2, le=730)
+
+
+# ---------- Alerts & notifications ----------
+class NotifySettingsIO(CamelModel):
+    sms_enabled: bool = True
+    sms_numbers: str = Field(default="", max_length=400)
+    email_enabled: bool = False
+    email: str = Field(default="", max_length=254)
+    digest_time: str = Field(default="07:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    on_expired: bool = True
+    on_critical: bool = True
+    on_soon: bool = False
+    on_low_stock: bool = True
+
+    @field_validator("email")
+    @classmethod
+    def email_ok(cls, v: str):
+        if v and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
+            raise ValueError("That email address doesn't look right")
+        return v
+
+    @field_validator("sms_numbers")
+    @classmethod
+    def numbers_ok(cls, v: str):
+        for n in [x.strip() for x in re.split(r"[,;\n]+", v) if x.strip()]:
+            if not re.fullmatch(r"\+?\d[\d\s]{7,}", n):
+                raise ValueError(f'"{n}" isn\'t a valid phone number')
+        return v
+
+
+class AlertOut(CamelModel):
+    key: str
+    type: str
+    status: str
+    title: str
+    text: str
+    item_id: str | None = None
+    days: int
+    read: bool
+
+
+class DeliveryOut(CamelModel):
+    id: str
+    channel: str
+    recipient: str
+    subject: str
+    message: str
+    status: str
+    error: str
+    kind: str
+    created_at: str
+
+
+class SendResult(CamelModel):
+    channel: str
+    status: str
+    detail: str
+
+
+# ---------- AI ----------
+class ChatTurn(BaseModel):
+    role: Literal["user", "ai"]
+    text: str = Field(max_length=4000)
+
+
+class AskIn(CamelModel):
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
+    # When set, the question is about this uploaded file instead of the saved inventory.
+    dataset_name: str | None = Field(default=None, max_length=200)
+    rows: list[ItemCreate] | None = Field(default=None, max_length=5000)
+
+
+class AskOut(BaseModel):
+    kind: Literal["report", "losses", "margins", "dashboard", "reorder", "text"]
+    text: str
+    facts: dict
+
+
+# ---------- Import ----------
+class ImportRowError(CamelModel):
+    row: int
+    error: str
+
+
+class ParseResult(CamelModel):
+    total: int
+    rows: list[ItemCreate]
+    errors: list[ImportRowError]
+
+
+class ImportResult(CamelModel):
+    dry_run: bool
+    total: int
+    added: int
+    updated: int
+    errors: list[ImportRowError]
+    preview: list[ItemCreate]

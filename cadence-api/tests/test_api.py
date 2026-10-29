@@ -111,6 +111,78 @@ def test_pharmacy(client):
     assert ph["name"] == "Harbour View Pharmacy" and ph["criticalDays"] == 30
 
 
+def test_ai_chat_routes_and_uses_real_numbers(client):
+    h = login(client, "abena@harbourview.example")
+    r = client.post("/api/v1/ai/chat", json={"message": "Where are we losing money to expiry?"}, headers=h).json()
+    assert r["kind"] == "losses" and r["facts"]["expired_batches"] == 4
+    assert client.post("/api/v1/ai/chat", json={"message": "monthly report"}, headers=h).json()["kind"] == "report"
+    assert client.post("/api/v1/ai/chat", json={"message": "tell me about Coartem"}, headers=h).json()["kind"] == "text"
+    # Dispensers can't use AI insights.
+    assert client.post("/api/v1/ai/chat", json={"message": "report"}, headers=login(client, "efua@harbourview.example")).status_code in (200, 403)
+
+
+def test_alerts_settings_and_test_sms(client):
+    h = login(client, "abena@harbourview.example")
+    alerts = client.get("/api/v1/alerts", headers=h).json()
+    assert any(a["status"] == "expired" for a in alerts) and all(not a["read"] for a in alerts)
+    assert client.post("/api/v1/alerts/read", json=[alerts[0]["key"]], headers=h).status_code == 204
+    assert client.get("/api/v1/alerts", headers=h).json()[0]["read"] is True
+    bad = client.put("/api/v1/alerts/settings", json={"smsNumbers": "abc"}, headers=h)
+    assert bad.status_code == 422
+    ok = client.put("/api/v1/alerts/settings", json={"smsNumbers": "+233 24 555 0142", "emailEnabled": True, "email": "a@b.com"}, headers=h)
+    assert ok.status_code == 200 and ok.json()["emailEnabled"] is True
+    r = client.post("/api/v1/alerts/test-sms", headers=h).json()
+    assert r["status"] == "mock"
+    assert client.post("/api/v1/alerts/test-email", headers=h).json()["status"] == "mock"
+    sent = client.post("/api/v1/alerts/send-digest", headers=h).json()
+    assert {x["channel"] for x in sent} == {"sms", "email"}
+    assert len(client.get("/api/v1/alerts/deliveries", headers=h).json()) >= 4
+
+
+def test_import_csv_dry_run_then_save(client):
+    h = login(client, "kojo@harbourview.example")
+    csv_text = ("Product,Category,Barcode,Batch No,Expiry Date,Quantity,Cost,Price,Supplier\n"
+                "Azithromycin 500mg Tabs ×3,Antibiotics,6034000221066,AZI-NEW,2030-05-01,40,12.5,24,Tobinco\n"
+                "Bad row,X,123,B1,not-a-date,1,1,2,\n")
+    files = {"file": ("stock.csv", csv_text.encode(), "text/csv")}
+    dry = client.post("/api/v1/items/import?dry_run=true", files=files, headers=h).json()
+    assert dry["total"] == 2 and len(dry["preview"]) == 1 and dry["errors"][0]["row"] == 3 and dry["added"] == 0
+    saved = client.post("/api/v1/items/import?dry_run=false", files={"file": ("stock.csv", csv_text.encode(), "text/csv")}, headers=h).json()
+    assert saved["added"] == 1
+    again = client.post("/api/v1/items/import?dry_run=false", files={"file": ("stock.csv", csv_text.encode(), "text/csv")}, headers=h).json()
+    assert again["updated"] == 1 and again["added"] == 0
+
+
+def test_parse_then_ask_about_uploaded_file(client):
+    h = login(client, "abena@harbourview.example")
+    csv_text = ("name,category,barcode,batch,expiry,qty,unit_cost,unit_price,supplier,sold\n"
+                "Test Amox 500mg,Antibiotics,1111111111,T1,2020-01-01,10,5,9,X,0\n"
+                "Test Para 500mg,Analgesics,2222222222,T2,2099-01-01,50,2,4,Y,30\n")
+    parsed = client.post("/api/v1/items/parse", files={"file": ("mine.csv", csv_text.encode(), "text/csv")}, headers=h).json()
+    assert parsed["total"] == 2 and len(parsed["rows"]) == 2 and parsed["rows"][1]["soldThisMonth"] == 30
+    r = client.post("/api/v1/ai/chat", json={"message": "where are we losing money", "datasetName": "mine.csv", "rows": parsed["rows"]}, headers=h).json()
+    assert r["kind"] == "losses" and r["facts"]["expired_batches"] == 1
+    rep = client.post("/api/v1/ai/chat", json={"message": "report", "rows": parsed["rows"]}, headers=h).json()
+    assert rep["facts"]["has_history"] is False and rep["facts"]["revenue"] == "₵120"
+    # Nothing was saved.
+    assert not any(i["batch"] == "T1" for i in client.get("/api/v1/items", headers=h).json())
+
+
+def test_general_question_without_ai_key_explains(client):
+    h = login(client, "abena@harbourview.example")
+    r = client.post("/api/v1/ai/chat", json={"message": "What is the capital of Ghana?", "history": [{"role": "ai", "text": "hi"}]}, headers=h).json()
+    assert r["kind"] == "text" and "AI_PROVIDER" in r["text"]
+    assert client.get("/api/v1/ai/status", headers=h).json() == {"connected": False}
+
+
+def test_pharmacy_thresholds(client):
+    h = login(client, "abena@harbourview.example")
+    assert client.patch("/api/v1/pharmacy", json={"criticalDays": 60, "soonDays": 30}, headers=h).status_code == 400
+    r = client.patch("/api/v1/pharmacy", json={"criticalDays": 45, "soonDays": 120}, headers=h)
+    assert r.status_code == 200 and r.json()["criticalDays"] == 45
+    client.patch("/api/v1/pharmacy", json={"criticalDays": 30, "soonDays": 90}, headers=h)
+
+
 def test_change_password(client):
     h = login(client, "kojo@harbourview.example")
     assert client.post("/api/v1/auth/change-password", json={"current": "nope", "next": "a-much-longer-pass"}, headers=h).status_code == 400

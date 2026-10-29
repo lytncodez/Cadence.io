@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 
 from .config import get_settings
 from .db import SessionLocal
-from .models import Batch, Pharmacy, Product, Role, Sale, User
+from .models import AlertRead, Batch, NotificationLog, NotificationSettings, Pharmacy, Product, Role, Sale, User
 from .security import hash_password
 
 ROWS = [
@@ -93,7 +93,7 @@ async def seed(reset: bool = False, wipe_only: bool = False) -> None:
     pw = get_settings().seed_password
     async with SessionLocal() as db:
         if reset:
-            for model in (Sale, Batch, Product, User, Role, Pharmacy):
+            for model in (NotificationLog, AlertRead, NotificationSettings, Sale, Batch, Product, User, Role, Pharmacy):
                 await db.execute(delete(model))
             await db.commit()
             if wipe_only:
@@ -106,6 +106,8 @@ async def seed(reset: bool = False, wipe_only: bool = False) -> None:
         ph = Pharmacy(name="Harbour View Pharmacy", location="Tema, Ghana", licence_no="PC/RP/1187/26")
         db.add(ph)
         await db.flush()
+        db.add(NotificationSettings(pharmacy_id=ph.id, sms_enabled=True, sms_numbers="+233 24 555 0142, +233 20 555 0198",
+                                    email_enabled=True, email="alerts@harbourview.example"))
         for name, summary, perms, locked in ROLES:
             db.add(Role(pharmacy_id=ph.id, name=name, summary=summary, perms=list(perms), locked=locked))
         hashed = hash_password(pw)

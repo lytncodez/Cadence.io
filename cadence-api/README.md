@@ -26,6 +26,16 @@ Expiry status (expired / critical / soon / safe) is computed from the expiry dat
 | GET | `/users` · `/roles` · `/pharmacy` | signed in |
 | PATCH | `/users/{id}` | yourself (name, phone, bio, photo, reg. no.) · admins (also position, department, role, status) |
 | GET | `/analytics/monthly?months=6` | signed in |
+| POST | `/items/import?dry_run=true\|false` | `import` · multipart `file` (.csv or .xlsx); dry run previews and lists bad rows |
+| PATCH | `/pharmacy` | `company` · name, location, licence, `criticalDays`, `soonDays` |
+| POST | `/ai/chat` `{ message, history?, datasetName?, rows? }` | `view_insights` → `{ kind, text, facts }`. With `rows`, the answer is about that uploaded data instead of the saved inventory |
+| POST | `/items/parse` | `view_insights` + `import` · multipart `file`; validates a CSV/Excel file and returns its rows without saving (for “Analyse only”) |
+| GET | `/ai/status` | signed in → `{ connected }` (true when an AI key is configured) |
+| GET | `/alerts` · POST `/alerts/read` `[keys]` | signed in |
+| GET/PUT | `/alerts/settings` | read: signed in · save: `manage_alerts` |
+| POST | `/alerts/test-sms` · `/alerts/test-email` · `/alerts/send-digest` | `manage_alerts` |
+| GET/DELETE | `/alerts/deliveries` | delivery log (last 20) |
+| POST | `/alerts/cron` | external cron, header `X-Cron-Secret` |
 | GET | `/health` | Render health check |
 
 Interactive docs at `/docs`.
@@ -75,5 +85,32 @@ The free plan sleeps after 15 minutes without traffic; the first request after t
 Log in as `abena@harbourview.example` with your `SEED_PASSWORD`, then change the password from **Profile → Password**.
 Before real use, remove the demo data with `python -m app.seed --wipe` (it asks you to type RESET), then create your real pharmacy and first admin with `python -m app.create_admin`.
 
-## Next (Phase 3)
-Alerts + SMS, AI insights (explaining the numbers from `/analytics`, never inventing them), pharmacy settings and invites.
+## 6. Turning on real SMS, email and AI
+Everything works in **mock** mode first: tests and digests are recorded in the delivery log (Alerts page) but nothing leaves the server. Switch each one on in Render → Environment, then redeploy.
+
+**SMS (Ghana)**
+- *Arkesel*: create an account at arkesel.com, request a sender ID (e.g. `Cadence`, max 11 characters) and copy your API key. Set `SMS_PROVIDER=arkesel`, `ARKESEL_API_KEY`, `SMS_SENDER_ID`.
+- *Hubtel*: set `SMS_PROVIDER=hubtel`, `HUBTEL_CLIENT_ID`, `HUBTEL_CLIENT_SECRET`, `SMS_SENDER_ID`.
+- Then Alerts → **Test SMS**. If it fails, the exact error from the provider shows in the delivery log.
+
+**Email**
+- Any SMTP account works. For Gmail: turn on 2-step verification, create an **App Password**, then set `EMAIL_PROVIDER=smtp`, `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=you@gmail.com`, `SMTP_PASSWORD=<app password>`, `SMTP_FROM=you@gmail.com`.
+- Then Alerts → **Test email**.
+
+**AI wording**
+- Set `AI_PROVIDER=anthropic` (or `openai`), the matching API key, and `AI_MODEL` to a model id from the provider's docs.
+- Questions about your stock get only figures Cadence already calculated, and the model is told not to invent numbers.
+- Any other question (medicines, storage, regulation, business, general knowledge) is answered from the model's own knowledge. Without a key, Cadence answers stock questions only and says general questions need the AI service.
+- If the provider is down or the key is wrong, answers fall back to the built-in wording, so the page never breaks.
+
+**Daily digest**
+Render's free plan sleeps, so a timer inside the app isn't reliable. Use a free scheduler instead:
+1. cron-job.org → new job → URL `https://<your-service>.onrender.com/api/v1/alerts/cron`, method **POST**, every 15 minutes.
+2. Add header `X-Cron-Secret` with the value of `CRON_SECRET` from Render.
+Each pharmacy gets one digest per day, after its "Send at" time (Ghana time).
+
+## Database migrations
+`alembic upgrade head` runs on every deploy (see the Dockerfile). Version `0002` adds `notification_settings`, `alert_reads` and `notification_log`.
+
+## Next
+Staff invites by email, purchase orders, multi-branch stock transfers.
