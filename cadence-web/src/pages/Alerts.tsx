@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LuCheck, LuCheckCheck, LuMessageSquare, LuMail, LuSend, LuBan, LuTriangleAlert, LuClock, LuLayers, LuArrowRight, LuTrash2, LuInfo, LuCircleAlert, LuCircleCheck } from "react-icons/lu";
+import { LuCheck, LuCheckCheck, LuMessageSquare, LuMail, LuSend, LuBan, LuTriangleAlert, LuClock, LuLayers, LuArrowRight, LuTrash2, LuInfo, LuCircleAlert, LuCircleCheck, LuSparkles, LuUsers } from "react-icons/lu";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Input, Skeleton, StatusPill, Toggle } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/overlay";
 import { useCan, useStore, USE_MOCK } from "@/lib/api";
-import { alerts as alertsApi, type AlertItem, type Delivery, type NotifySettings, type SendResult } from "@/lib/features";
+import { alerts as alertsApi, sendWeeklyReport, type AlertItem, type Delivery, type NotifySettings, type SendResult } from "@/lib/features";
 import { Link } from "@/lib/router";
 import { cn, fmtStamp } from "@/lib/utils";
 
@@ -14,6 +14,9 @@ export default function Alerts() {
   const can = useCan();
   const toast = useToast();
   const items = useStore((s) => s.items), thresholds = useStore((s) => s.thresholds);
+  const users = useStore((s) => s.users), roles = useStore((s) => s.roles);
+  const team = useMemo(() => users.filter((u) => u.status === "Active"), [users]);
+  const seesMoney = (role: string) => !!roles.find((r) => r.name === role)?.perms.includes("view_finance");
   const [list, setList] = useState<AlertItem[] | null>(null);
   const [ns, setNs] = useState<NotifySettings | null>(null);
   const [log, setLog] = useState<Delivery[]>([]);
@@ -101,7 +104,7 @@ export default function Alerts() {
 
         <div className="grid min-w-0 gap-4">
           <Card>
-            <CardHeader title="Delivery" subtitle={manage ? "Morning SMS and a daily email digest" : "Set by your pharmacy admin"} action={<Badge>{USE_MOCK ? "Demo mode" : "Live"}</Badge>} />
+            <CardHeader title="Delivery" subtitle={manage ? "Morning SMS, a daily email digest and a weekly AI report" : "Set by your pharmacy admin"} action={<Badge>{USE_MOCK ? "Demo mode" : "Live"}</Badge>} />
             {!ns ? <div className="grid gap-3 px-5 pb-5"><Skeleton className="h-10" /><Skeleton className="h-10" /></div> : (
               <form className="grid gap-4 px-5 pb-5" onSubmit={(e) => { e.preventDefault(); void save(); }}>
                 <Row icon={<LuMessageSquare />} title="SMS alerts" hint="Critical and expired batches, once a day">
@@ -119,6 +122,45 @@ export default function Alerts() {
                 <Field label="Send at (Ghana time)" htmlFor="al-time">
                   <Input id="al-time" type="time" value={ns.digestTime} onChange={(e) => setNs({ ...ns, digestTime: e.target.value })} disabled={!manage} className="max-w-[160px]" />
                 </Field>
+                {manage && team.length > 0 && (
+                  <div className="grid gap-1 rounded-2xl border border-line p-3">
+                    <p className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wider text-muted uppercase"><LuUsers className="size-3.5" />Also send to</p>
+                    <p className="px-1 pb-1 text-xs text-muted">Uses the phone and email on each person's profile. People who can't see finance get the same alerts without money figures.</p>
+                    <ul className="grid gap-0.5">
+                      {team.map((u) => {
+                        const toggle = (key: "smsUserIds" | "emailUserIds", on: boolean) =>
+                          setNs({ ...ns, [key]: on ? [...ns[key].filter((x) => x !== u.id), u.id] : ns[key].filter((x) => x !== u.id) });
+                        return (
+                          <li key={u.id} className="flex items-center gap-2 rounded-xl px-1 py-1.5 text-sm">
+                            <span className="min-w-0 flex-1"><span className="block truncate font-medium">{u.name}</span>
+                              <span className="block truncate text-xs text-muted">{u.role}{seesMoney(u.role) ? "" : " · no money figures"}{!u.phone ? " · no phone on profile" : ""}</span></span>
+                            <label className={cn("flex items-center gap-1 text-xs", !u.phone && "opacity-40")} title={u.phone ? `Text ${u.phone}` : "Add a phone number to their profile first"}>
+                              <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={ns.smsUserIds.includes(u.id)} disabled={!u.phone} onChange={(e) => toggle("smsUserIds", e.target.checked)} aria-label={`Text alerts to ${u.name}`} />SMS
+                            </label>
+                            <label className="flex items-center gap-1 text-xs" title={`Email ${u.email}`}>
+                              <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={ns.emailUserIds.includes(u.id)} onChange={(e) => toggle("emailUserIds", e.target.checked)} aria-label={`Email alerts to ${u.name}`} />Email
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+                <div className="grid gap-3 rounded-2xl border border-line p-3">
+                  <Row icon={<LuSparkles />} title="Weekly AI report" hint="Sales, losses and three priorities for the week, by email">
+                    <Toggle checked={ns.weeklyEnabled} onChange={(v) => setNs({ ...ns, weeklyEnabled: v })} label="Weekly AI report" disabled={!manage} />
+                  </Row>
+                  {ns.weeklyEnabled && (
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <label htmlFor="al-weekday" className="text-ink-2">Every</label>
+                      <select id="al-weekday" value={ns.weeklyDay} disabled={!manage} onChange={(e) => setNs({ ...ns, weeklyDay: Number(e.target.value) })} className="h-9 rounded-lg border border-line bg-surface px-2 text-sm">
+                        {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((d, i) => <option key={d} value={i}>{d}</option>)}
+                      </select>
+                      <span className="text-xs text-muted">with the digest. Goes to the alert email and chosen people who can see finance.</span>
+                    </div>
+                  )}
+                  {manage && <Button type="button" size="sm" className="w-fit" loading={busy === "weekly"} onClick={() => run("weekly", sendWeeklyReport)}><LuSparkles />Send this week's report now</Button>}
+                </div>
                 <div className="grid gap-1 rounded-2xl border border-line p-3">
                   <p className="px-1 pb-1 text-xs font-semibold tracking-wider text-muted uppercase">Alert me about</p>
                   {([["onExpired", "Expired batches", LuBan], ["onCritical", `Critical batches (1–${thresholds.criticalMax} days)`, LuTriangleAlert], ["onSoon", `Expiring soon (${thresholds.criticalMax + 1}–${thresholds.soonMax} days)`, LuClock], ["onLowStock", "Low stock", LuLayers]] as const).map(([k, l, I]) => (
@@ -155,7 +197,7 @@ export default function Alerts() {
                     <details className="group rounded-xl border border-line px-3 py-2.5 open:bg-surface-2">
                       <summary className="flex cursor-pointer list-none items-center gap-2.5 text-sm [&::-webkit-details-marker]:hidden">
                         {d.channel === "sms" ? <LuMessageSquare className="size-4 text-muted" /> : <LuMail className="size-4 text-muted" />}
-                        <span className="min-w-0 flex-1 truncate">{d.kind === "test" ? "Test" : d.kind === "reset" ? "Password reset" : "Digest"} · {d.recipient}</span>
+                        <span className="min-w-0 flex-1 truncate">{d.kind === "test" ? "Test" : d.kind === "reset" ? "Password reset" : d.kind === "weekly" ? "Weekly report" : "Digest"} · {d.recipient}</span>
                         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase", d.status === "sent" ? "bg-safe-soft text-safe-ink" : d.status === "failed" ? "bg-critical-soft text-critical-ink" : "bg-brand-soft text-brand-ink")}>{d.status === "mock" ? "logged" : d.status}</span>
                         <time className="hidden shrink-0 text-xs text-muted tabular sm:inline">{fmtStamp(d.createdAt).replace("Today · ", "")}</time>
                       </summary>

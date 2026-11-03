@@ -247,6 +247,10 @@ class NotifySettingsIO(CamelModel):
     on_critical: bool = True
     on_soon: bool = False
     on_low_stock: bool = True
+    sms_user_ids: list[str] = Field(default_factory=list, max_length=50)
+    email_user_ids: list[str] = Field(default_factory=list, max_length=50)
+    weekly_enabled: bool = True
+    weekly_day: int = Field(default=0, ge=0, le=6)
 
     @field_validator("email")
     @classmethod

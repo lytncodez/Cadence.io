@@ -5,13 +5,16 @@ so the whole flow can be tested before any accounts are set up."""
 import asyncio
 import re
 import smtplib
+import uuid
+from dataclasses import dataclass
 from email.message import EmailMessage
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..models import NotificationLog, NotificationSettings
+from ..models import HqDelivery, NotificationLog, NotificationSettings, Role, User
 from .analytics import Summary, money
 
 
@@ -36,7 +39,7 @@ def compute_alerts(s: Summary, ns: NotificationSettings, finance: bool = True) -
     return sorted(out, key=lambda a: (a["type"] == "stock", rank[a["status"]], a["days"]))
 
 
-def sms_text(s: Summary, ns: NotificationSettings) -> str:
+def sms_text(s: Summary, ns: NotificationSettings, finance: bool = True) -> str:
     exp = [r for r in s.rows if r.status == "expired"] if ns.on_expired else []
     crit = [r for r in s.rows if r.status == "critical"] if ns.on_critical else []
     if not exp and not crit:
@@ -46,19 +49,60 @@ def sms_text(s: Summary, ns: NotificationSettings) -> str:
         first = ", ".join(f"{r.name.split()[0]} {r.batch} ({r.days}d)" for r in crit[:3])
         parts.append(f"{len(crit)} critical: {first}{' +more' if len(crit) > 3 else ''}.")
     if exp:
-        parts.append(f"{len(exp)} expired ({money(sum(r.value for r in exp))}). Quarantine today.")
+        parts.append(f"{len(exp)} expired" + (f" ({money(sum(r.value for r in exp))})" if finance else "") + ". Quarantine today.")
     return " ".join(parts)[:459]  # 3 SMS segments
 
 
-def email_body(s: Summary, alerts: list[dict]) -> tuple[str, str]:
+def email_body(s: Summary, alerts: list[dict], finance: bool = True, ai_note: str = "") -> tuple[str, str]:
     subject = f"Cadence daily digest · {s.counts['critical']} critical, {s.counts['expired']} expired"
     lines = [f"Good morning from Cadence. Here's {s.pharmacy} today.", ""]
+    if ai_note:
+        lines += ["TODAY'S PRIORITIES (Cadence AI)", ai_note, ""]
     for a in alerts:
         lines.append(f"[{a['status'].upper()}] {a['title']}: {a['text']}")
     if not alerts:
         lines.append("Nothing needs attention today.")
-    lines += ["", f"Usable stock value: {money(s.stock_value)}.", "Open Cadence to act on these."]
+    lines += [""] + ([f"Usable stock value: {money(s.stock_value)}."] if finance else []) + ["Open Cadence to act on these."]
     return subject, "\n".join(lines)
+
+
+@dataclass
+class Recipient:
+    address: str  # phone number (digits) or email
+    finance: bool  # may this person see money figures?
+    name: str = ""
+
+
+async def recipients(db: AsyncSession, ns: NotificationSettings, pharmacy_id) -> tuple[list[Recipient], list[Recipient]]:
+    """Who gets this pharmacy's alerts: the numbers and address typed into Alerts, plus chosen team members
+    (using the phone and email on their profile). People whose role can't see finance get wording without money."""
+    sms = [Recipient(n, True) for n in numbers(ns.sms_numbers)]
+    emails = [Recipient(ns.email.strip(), True)] if ns.email and ns.email.strip() else []
+    wanted = {str(i) for i in (ns.sms_user_ids or []) + (ns.email_user_ids or [])}
+    if wanted:
+        ids = []
+        for i in wanted:
+            try:
+                ids.append(uuid.UUID(i))
+            except ValueError:
+                continue
+        users = (await db.scalars(select(User).where(User.pharmacy_id == pharmacy_id, User.id.in_(ids), User.status == "Active"))).all() if ids else []
+        roles = {r.name: set(r.perms or []) for r in (await db.scalars(select(Role).where(Role.pharmacy_id == pharmacy_id))).all()}
+        for u in users:
+            fin = "view_finance" in roles.get(u.role, set())
+            if str(u.id) in {str(i) for i in ns.sms_user_ids or []}:
+                sms += [Recipient(n, fin, u.name) for n in numbers(u.phone)]
+            if str(u.id) in {str(i) for i in ns.email_user_ids or []} and u.email:
+                emails.append(Recipient(u.email, fin, u.name))
+
+    def dedupe(rs: list[Recipient]) -> list[Recipient]:
+        seen: dict[str, Recipient] = {}
+        for r in rs:
+            k = r.address.lower()
+            # If the same address is listed twice, the stricter (no-finance) version wins.
+            seen[k] = r if k not in seen else Recipient(r.address, seen[k].finance and r.finance, seen[k].name or r.name)
+        return list(seen.values())
+    return dedupe(sms), dedupe(emails)
 
 
 def numbers(raw: str) -> list[str]:
@@ -199,3 +243,9 @@ def sms_problem() -> str:
 async def log(db: AsyncSession, pharmacy_id, channel: str, recipient: str, message: str, status: str, error: str, kind: str, subject: str = ""):
     db.add(NotificationLog(pharmacy_id=pharmacy_id, channel=channel, recipient=recipient, subject=subject,
                            message=message, status=status, error=error, kind=kind))
+
+
+def hq_log(db: AsyncSession, channel: str, recipient: str, message: str, status: str, error: str, kind: str, subject: str = "") -> None:
+    """Record a message HQ sent (tests, HQ digest, help-request alerts, broadcasts, replies). The caller commits."""
+    db.add(HqDelivery(channel=channel, recipient=recipient[:2000], subject=subject[:200], message=message[:8000],
+                      status=status, error=error[:2000], kind=kind))

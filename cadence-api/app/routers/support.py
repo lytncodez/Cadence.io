@@ -13,7 +13,7 @@ from ..deps import current_user
 from ..models import Pharmacy, SupportTicket, User
 from ..schemas import CamelModel
 from ..services import usage
-from ..services.notify import numbers, send_email, send_sms
+from ..services.notify import hq_log, numbers, send_email, send_sms
 
 router = APIRouter(prefix="/support", tags=["support"])
 
@@ -77,11 +77,23 @@ async def raise_ticket(body: TicketIn, user: User = Depends(current_user), db: A
     label = CATEGORIES[body.category]
     to_email, to_sms = s.hq_notify_email or s.demo_notify_email, s.hq_notify_sms or s.demo_notify_sms
     if to_email:
-        await send_email(to_email, f"{'URGENT ' if body.urgency == 'urgent' else ''}Help request: {ph.name} · {label}",
-                         f"{ph.name} ({ph.location}) asked for help.\n\nFrom: {user.name} ({user.role}) <{user.email}> {t.phone}\n"
-                         f"Type: {label}\nUrgency: {body.urgency}\n\n{t.message}\n\nOpen Cadence HQ to respond.")
+        subject = f"{'URGENT ' if body.urgency == 'urgent' else ''}Help request: {ph.name} · {label}"
+        text = (f"{ph.name} ({ph.location}) asked for help.\n\nFrom: {user.name} ({user.role}) <{user.email}> {t.phone}\n"
+                f"Type: {label}\nUrgency: {body.urgency}\n\n{t.message}\n\nOpen Cadence HQ to respond.")
+        st, err = await send_email(to_email, subject, text)
+        hq_log(db, "email", to_email, text, st, err, "help", subject)
     if to_sms and body.urgency == "urgent" and numbers(to_sms):
-        await send_sms(numbers(to_sms), f"URGENT Cadence help: {ph.name} · {label}. {user.name} {t.phone}")
+        sms = f"URGENT Cadence help: {ph.name} · {label}. {user.name} {t.phone}"
+        st, err = await send_sms(numbers(to_sms), sms)
+        hq_log(db, "sms", to_sms, sms, st, err, "help")
+    # Confirm to the person who asked, so they know it landed (best effort).
+    if user.email:
+        first = (user.name or "there").split()[0]
+        conf = (f"Hi {first},\n\nWe've got your help request ({label}) and the Cadence team has been told"
+                + (" straight away because you marked it urgent" if body.urgency == "urgent" else "")
+                + ".\n\nYou'll see our reply in Cadence under Get help, and we'll email you too.\n\nCadence support")
+        await send_email(user.email, f"We've got your request: {label}", conf)
+    await db.commit()
     return ticket_out(t, user.name)
 
 

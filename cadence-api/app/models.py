@@ -121,6 +121,13 @@ class NotificationSettings(Base):
     on_soon: Mapped[bool] = mapped_column(default=False)
     on_low_stock: Mapped[bool] = mapped_column(default=True)
     last_digest_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Team members who also get the alerts, using the phone/email on their profile (ids of users in this pharmacy).
+    sms_user_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    email_user_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Weekly AI report by email (0 = Monday ... 6 = Sunday), sent with the digest on that day.
+    weekly_enabled: Mapped[bool] = mapped_column(default=True)
+    weekly_day: Mapped[int] = mapped_column(Integer, default=0)
+    last_weekly_on: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class AlertRead(Base):
@@ -209,3 +216,32 @@ class SupportTicket(Base):
     reply: Mapped[str] = mapped_column(Text, default="")  # HQ's reply, shown to the pharmacy
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Announcement(Base):
+    """A message from Cadence HQ to pharmacies: shown in the app (in_app) and/or sent to each pharmacy's admins."""
+    __tablename__ = "announcements"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(160))
+    body: Mapped[str] = mapped_column(Text)
+    sms_text: Mapped[str] = mapped_column(String(480), default="")
+    channels: Mapped[list[str]] = mapped_column(JSON, default=list)  # in_app | email | sms
+    audience: Mapped[str] = mapped_column(String(20), default="all")  # all | active | quiet | at_risk | new | inactive | selected
+    pharmacy_ids: Mapped[list[str]] = mapped_column(JSON, default=list)  # the pharmacies it went to (resolved at send time)
+    results: Mapped[dict] = mapped_column(JSON, default=dict)  # {"email": {"sent": 3, "failed": 0, "mock": 0}, ...}
+    sent_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class HqDelivery(Base):
+    """Messages Cadence HQ itself sent or received: tests, the HQ digest, help-request alerts, broadcasts, ticket replies."""
+    __tablename__ = "hq_deliveries"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    channel: Mapped[str] = mapped_column(String(10))  # sms | email | ai
+    recipient: Mapped[str] = mapped_column(EncryptedText, default="")  # encrypted at rest
+    subject: Mapped[str] = mapped_column(String(200), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(10))  # sent | mock | failed
+    error: Mapped[str] = mapped_column(Text, default="")
+    kind: Mapped[str] = mapped_column(String(20), default="test")  # test | digest | help | broadcast | reply
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)

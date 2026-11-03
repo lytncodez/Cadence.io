@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LuLayoutDashboard, LuStore, LuLifeBuoy, LuInbox, LuLogOut, LuSiren, LuSearch, LuArrowRight, LuShieldCheck, LuUsers,
   LuActivity, LuSparkles, LuUpload, LuMessageSquare, LuMail, LuCircleCheck, LuEye, LuPhone, LuRefreshCw, LuCircleAlert,
+  LuMegaphone, LuServer,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { Button, Card, CardHeader, EmptyState, Input, Logo } from "@/components/ui/primitives";
 import { Drawer, useToast } from "@/components/ui/overlay";
 import { Sparkline } from "@/components/charts";
 import { hq, useHqSession, type Health, type HqDetail, type HqOverview, type HqPharmacy, type HqTicket, type Lead } from "@/lib/hq";
+import { AskAi, BriefingCard, Messages, SystemPage } from "./HqComms";
 import { Link, navigate } from "@/lib/router";
 import { cn, fmtDate, fmtStamp, int, daysUntil } from "@/lib/utils";
 
@@ -62,6 +64,9 @@ const NAV: { to: string; label: string; icon: IconType }[] = [
   { to: "/hq/pharmacies", label: "Pharmacies", icon: LuStore },
   { to: "/hq/help", label: "Help requests", icon: LuLifeBuoy },
   { to: "/hq/leads", label: "Demo requests", icon: LuInbox },
+  { to: "/hq/ai", label: "Ask AI", icon: LuSparkles },
+  { to: "/hq/messages", label: "Messages", icon: LuMegaphone },
+  { to: "/hq/system", label: "System", icon: LuServer },
 ];
 
 function HqShell({ path }: { path: string }) {
@@ -77,7 +82,8 @@ function HqShell({ path }: { path: string }) {
   }, () => {}), [toast]);
   useEffect(() => { void refresh(); const t = window.setInterval(refresh, 30000); return () => clearInterval(t); }, [refresh]);
   const p = path.split("?")[0].replace(/\/+$/, "") || "/hq";
-  const page = p === "/hq/pharmacies" ? <Pharmacies /> : p === "/hq/help" ? <Help onChange={refresh} /> : p === "/hq/leads" ? <Leads /> : <Overview ov={ov} />;
+  const page = p === "/hq/pharmacies" ? <Pharmacies /> : p === "/hq/help" ? <Help onChange={refresh} /> : p === "/hq/leads" ? <Leads />
+    : p === "/hq/ai" ? <AskAi /> : p === "/hq/messages" ? <Messages /> : p === "/hq/system" ? <SystemPage /> : <Overview ov={ov} />;
 
   return (
     <div className="min-h-full bg-bg">
@@ -148,6 +154,7 @@ function Overview({ ov }: { ov: HqOverview | null }) {
   const needs = list.filter((p) => p.urgentOpen || p.health === "at_risk" || p.health === "inactive").slice(0, 6);
   return (
     <div className="grid gap-4">
+      <BriefingCard />
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <Stat icon={LuStore} label="Pharmacies" value={ov.pharmacies} sub={`${ov.newThisWeek} joined this week`} />
         <Stat icon={LuActivity} label="Active this week" value={ov.activeThisWeek} tone="safe" sub={`${ov.users} people in total`} />
@@ -266,10 +273,11 @@ function Help({ onChange }: { onChange: () => void }) {
   const [status, setStatus] = useState<"open" | "resolved" | "all">("open");
   const [list, setList] = useState<HqTicket[] | null>(null);
   const [reply, setReply] = useState<Record<string, string>>({});
+  const [textIt, setTextIt] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(() => hq.tickets(status).then(setList, () => setList([])), [status]);
   useEffect(() => { void load(); const t = window.setInterval(load, 30000); return () => clearInterval(t); }, [load]);
-  async function update(t: HqTicket, patch: { status?: HqTicket["status"]; reply?: string }, msg: string) {
+  async function update(t: HqTicket, patch: { status?: HqTicket["status"]; reply?: string; textReply?: boolean }, msg: string) {
     setBusy(t.id);
     try { await hq.updateTicket(t.id, patch); toast({ message: msg }); await load(); onChange(); } catch (e) { toast({ message: (e as Error).message, tone: "error" }); } finally { setBusy(null); }
   }
@@ -299,8 +307,11 @@ function Help({ onChange }: { onChange: () => void }) {
               <div className="grid content-start gap-2">
                 <textarea rows={3} value={reply[t.id] ?? ""} onChange={(e) => setReply((r) => ({ ...r, [t.id]: e.target.value }))} placeholder="Reply to the pharmacy (they see it in Cadence and by email)"
                   className="rounded-xl border border-line bg-surface px-3 py-2 text-sm placeholder:text-muted focus:border-brand focus:outline-none" aria-label={`Reply to ${t.pharmacyName}`} />
+                {t.phone && reply[t.id]?.trim() && (
+                  <label className="flex items-center gap-2 text-xs text-ink-2"><input type="checkbox" className="size-4 accent-[var(--brand)]" checked={!!textIt[t.id]} onChange={(e) => setTextIt((x) => ({ ...x, [t.id]: e.target.checked }))} />Also text the reply to {t.phone}</label>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  {reply[t.id]?.trim() && <Button size="sm" variant="primary" loading={busy === t.id} onClick={() => update(t, { reply: reply[t.id], status: t.status === "open" ? "acknowledged" : t.status }, "Reply sent")}><LuMessageSquare />Send reply</Button>}
+                  {reply[t.id]?.trim() && <Button size="sm" variant="primary" loading={busy === t.id} onClick={() => update(t, { reply: reply[t.id], status: t.status === "open" ? "acknowledged" : t.status, textReply: !!textIt[t.id] && !!t.phone }, textIt[t.id] ? "Reply sent by email and SMS" : "Reply sent")}><LuMessageSquare />Send reply</Button>}
                   {t.status === "open" && <Button size="sm" loading={busy === t.id} onClick={() => update(t, { status: "acknowledged" }, "Marked as seen")}><LuEye />Mark seen</Button>}
                   {t.status !== "resolved" ? <Button size="sm" variant="ghost" loading={busy === t.id} onClick={() => update(t, { status: "resolved" }, "Resolved")}><LuCircleCheck />Resolve</Button>
                     : <Button size="sm" variant="ghost" onClick={() => update(t, { status: "open" }, "Reopened")}>Reopen</Button>}

@@ -62,6 +62,14 @@ async def signup(body: SignupIn, request: Request, db: AsyncSession = Depends(ge
     admin.last_login = admin.last_seen_at = datetime.now(timezone.utc)
     usage.record(db, ph.id, "signup", admin.id)
     await db.commit()
+    # Welcome the new admin with the three steps that make Cadence useful (best effort).
+    first = (admin.name or "there").split()[0]
+    await send_email(admin.email, f"Welcome to Cadence, {first}",
+                     f"Hi {first},\n\n{ph.name} is set up on Cadence.io. Three things to do first:\n\n"
+                     f"1. Add your stock: Inventory > Import takes a CSV or Excel file (download the template there), or scan items one by one.\n"
+                     f"2. Switch on alerts: Alerts > Delivery. Add phone numbers for the morning SMS and an email for the daily digest and weekly AI report.\n"
+                     f"3. Invite your team: Settings > Team > Invite. Everyone gets their own login and role.\n\n"
+                     f"Stuck? Press Get help in the app and the Cadence team will get back to you.\n\n{s.app_url.rstrip('/')}/login\n\nThe Cadence team")
     if s.demo_notify_email:  # let the Cadence team know a pharmacy joined (best effort)
         await send_email(s.demo_notify_email, f"New pharmacy on Cadence: {ph.name}",
                          f"{ph.name} ({ph.location}) just created an account.\nAdmin: {admin.name} <{admin.email}> {body.phone}")

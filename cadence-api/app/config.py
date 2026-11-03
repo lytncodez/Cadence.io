@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # Cadence HQ: where "Get help" requests from pharmacies are sent (falls back to DEMO_NOTIFY_EMAIL / DEMO_NOTIFY_SMS).
     hq_notify_email: str = ""
     hq_notify_sms: str = ""
+    # Daily HQ email (sign-ups, who's gone quiet, open help requests, AI briefing), sent by the same cron after this time (UTC).
+    hq_digest_enabled: bool = True
+    hq_digest_time: str = "08:00"
 
     # Let pharmacies create their own account from the website. Set to false to only add pharmacies yourself.
     signup_enabled: bool = True

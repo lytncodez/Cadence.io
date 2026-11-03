@@ -450,3 +450,133 @@ def test_hq_and_pharmacy_logins_are_separate(client):
     hq = _bearer(client.post("/api/v1/hq/auth/login", json={"email": "hq@cadence.example", "password": "hq-password-2026!"}))
     assert client.get("/api/v1/items", headers=hq).status_code == 401  # HQ can't open a pharmacy's stock
     assert client.post("/api/v1/hq/auth/login", json={"email": "abena@harbourview.example", "password": "cadence2026"}).status_code == 401
+
+
+# ---------- Messaging to chosen staff, weekly AI report ----------
+def test_alerts_go_to_chosen_staff_without_money_for_non_finance_roles(client):
+    a = login(client, "abena@harbourview.example")
+    users = {u["email"]: u["id"] for u in client.get("/api/v1/users", headers=a).json()}
+    ns = client.get("/api/v1/alerts/settings", headers=a).json()
+    ns |= {"emailEnabled": True, "smsEnabled": True,
+           "emailUserIds": [users["efua@harbourview.example"], "not-a-real-id"], "smsUserIds": [users["efua@harbourview.example"]]}
+    saved = client.put("/api/v1/alerts/settings", json=ns, headers=a).json()
+    assert saved["emailUserIds"] == [users["efua@harbourview.example"]]  # unknown ids are dropped
+    assert saved["weeklyEnabled"] is True and saved["weeklyDay"] == 0
+    assert client.post("/api/v1/alerts/send-digest", headers=a).status_code == 200
+    log = client.get("/api/v1/alerts/deliveries", headers=a).json()
+    efua_email = next(d for d in log if d["recipient"] == "efua@harbourview.example" and d["kind"] == "digest")
+    shared = next(d for d in log if d["recipient"] == saved["email"] and d["kind"] == "digest")
+    assert "₵" not in efua_email["message"] and "₵" in shared["message"]  # a dispenser doesn't see money
+    efua_sms = next(d for d in log if d["channel"] == "sms" and "233275550311" in d["recipient"])
+    assert "₵" not in efua_sms["message"]
+
+
+def test_weekly_ai_report_goes_to_finance_recipients_only(client):
+    a = login(client, "abena@harbourview.example")
+    r = client.post("/api/v1/alerts/send-weekly", headers=a)
+    assert r.status_code == 200 and r.json()[0]["status"] == "mock"
+    weekly = [d for d in client.get("/api/v1/alerts/deliveries", headers=a).json() if d["kind"] == "weekly"]
+    shared = client.get("/api/v1/alerts/settings", headers=a).json()["email"]
+    assert {d["recipient"] for d in weekly} == {shared}  # efua (no finance) is skipped
+    assert "weekly report" in weekly[0]["subject"] and "THE FIGURES" in weekly[0]["message"] and "1. " in weekly[0]["message"]
+    d = login(client, "efua@harbourview.example")
+    assert client.post("/api/v1/alerts/send-weekly", headers=d).status_code == 403
+
+
+# ---------- HQ: AI, system, broadcasts, digest ----------
+def _hq(client):
+    email, pw = "hq3@cadence.example", "hq-password-2026!"
+    try:
+        _make_hq_admin(email, pw)
+    except Exception:  # already created by an earlier test
+        pass
+    return _bearer(client.post("/api/v1/hq/auth/login", json={"email": email, "password": pw}))
+
+
+def test_hq_ai_briefing_chat_and_draft_work_without_ai(client):
+    hq = _hq(client)
+    b = client.post("/api/v1/hq/ai/briefing", headers=hq).json()
+    assert b["ai"] is False and "pharmacies used Cadence this week" in b["text"]
+    c = client.post("/api/v1/hq/ai/chat", json={"message": "Who should I call today?"}, headers=hq).json()
+    assert c["ai"] is False and "AI_PROVIDER" in c["text"]
+    d = client.post("/api/v1/hq/ai/draft", json={"notes": "Maintenance on Sunday at 10pm for 30 minutes."}, headers=hq).json()
+    assert d["title"] and d["sms"].startswith("Cadence:")
+    pharmacy = login(client, "abena@harbourview.example")
+    for method, path in (("POST", "/api/v1/hq/ai/briefing"), ("GET", "/api/v1/hq/system"), ("POST", "/api/v1/hq/broadcasts")):
+        assert client.request(method, path, headers=pharmacy, json={}).status_code == 401  # pharmacy logins can't use HQ
+
+
+def test_hq_ai_never_sees_business_data(client, monkeypatch):
+    from app.services import ai
+    seen = {}
+
+    async def fake_llm(system, question, f, history, max_tokens):
+        seen["facts"] = f
+        return "Call Harbour View."
+    monkeypatch.setattr(ai, "_llm", fake_llm)
+    hq = _hq(client)
+    r = client.post("/api/v1/hq/ai/briefing", headers=hq).json()
+    assert r["text"] == "Call Harbour View." and r["ai"] is True
+    blob = str(seen["facts"])
+    for secret in ("₵", "Coartem", "@harbourview", "unit_cost", "batch_no", "+233", "Abena"):
+        assert secret not in blob, secret
+
+
+def test_hq_system_and_tests(client):
+    hq = _hq(client)
+    s = client.get("/api/v1/hq/system", headers=hq).json()
+    assert s["sms"]["status"] == "demo" and s["hqEmail"]["status"] in ("live", "needs_setup")
+    assert client.post("/api/v1/hq/test", json={"channel": "email", "to": "me@example.com"}, headers=hq).json()["status"] == "mock"
+    assert client.post("/api/v1/hq/test", json={"channel": "sms", "to": "024 555 0142"}, headers=hq).json()["status"] == "mock"
+    assert client.post("/api/v1/hq/test", json={"channel": "ai"}, headers=hq).json()["status"] == "mock"
+    log = client.get("/api/v1/hq/deliveries?kind=test", headers=hq).json()
+    assert {d["channel"] for d in log} >= {"email", "sms", "ai"}
+
+
+def test_hq_broadcast_reaches_admins_and_shows_in_app(client):
+    hq = _hq(client)
+    body = {"title": "Sunday maintenance", "message": "Cadence will be down for 30 minutes on Sunday at 10pm.",
+            "channels": ["in_app", "email", "sms"], "audience": "all"}
+    dry = client.post("/api/v1/hq/broadcasts", json=body | {"dryRun": True}, headers=hq).json()
+    assert dry["dryRun"] and dry["pharmacies"] >= 2 and dry["emailRecipients"] >= 2
+    assert client.get("/api/v1/hq/broadcasts", headers=hq).json() == []  # a dry run saves nothing
+    sent = client.post("/api/v1/hq/broadcasts", json=body, headers=hq).json()
+    assert sent["results"]["email"]["mock"] == dry["emailRecipients"] and sent["results"]["in_app"]["pharmacies"] == dry["pharmacies"]
+    assert client.get("/api/v1/hq/broadcasts", headers=hq).json()[0]["title"] == "Sunday maintenance"
+    # every pharmacy user sees it in the app
+    for email in ("efua@harbourview.example",):
+        ann = client.get("/api/v1/announcements", headers=login(client, email)).json()
+        assert ann[0]["title"] == "Sunday maintenance"
+    # a broadcast to selected pharmacies only reaches them
+    rows = client.get("/api/v1/hq/pharmacies", headers=hq).json()
+    osu = next(r for r in rows if "Osu" in r["name"])
+    client.post("/api/v1/hq/broadcasts", json={"title": "Osu only", "message": "Just for you.", "channels": ["in_app"],
+                                               "audience": "selected", "pharmacyIds": [osu["id"]]}, headers=hq)
+    titles = [a["title"] for a in client.get("/api/v1/announcements", headers=login(client, "abena@harbourview.example")).json()]
+    assert "Osu only" not in titles
+    assert client.post("/api/v1/hq/broadcasts", json=body | {"audience": "selected", "pharmacyIds": []}, headers=hq).status_code == 400
+
+
+def test_hq_digest_preview_and_ticket_sms_reply(client):
+    hq = _hq(client)
+    p = client.get("/api/v1/hq/digest/preview", headers=hq).json()
+    assert p["subject"].startswith("Cadence HQ") and "BRIEFING" in p["body"] and "₵" not in p["body"]
+    h = login(client, "kojo@harbourview.example")
+    t = client.post("/api/v1/support/tickets", json={"category": "question", "message": "How do I export?", "phone": "+233 20 555 0198"}, headers=h).json()
+    r = client.patch(f"/api/v1/hq/tickets/{t['id']}", json={"reply": "Inventory > Export.", "textReply": True}, headers=hq)
+    assert r.status_code == 200
+    kinds = [(d["kind"], d["channel"]) for d in client.get("/api/v1/hq/deliveries", headers=hq).json()]
+    assert ("reply", "sms") in kinds and ("reply", "email") in kinds
+
+
+def test_cron_sends_digests_weekly_and_hq_digest(client, monkeypatch):
+    from app.config import get_settings
+    s = get_settings()
+    monkeypatch.setattr(s, "cron_secret", "cron-test-secret")
+    monkeypatch.setattr(s, "hq_notify_email", "hq@cadence.example")
+    monkeypatch.setattr(s, "hq_digest_time", "00:00")
+    assert client.post("/api/v1/alerts/cron", headers={"X-Cron-Secret": "wrong"}).status_code == 403
+    r = client.post("/api/v1/alerts/cron", headers={"X-Cron-Secret": "cron-test-secret"}).json()
+    assert set(r) == {"messages", "weekly", "hq_digest"} and r["hq_digest"] == "mock"
+    again = client.post("/api/v1/alerts/cron", headers={"X-Cron-Secret": "cron-test-secret"}).json()
+    assert again["hq_digest"] == "skipped"  # once a day

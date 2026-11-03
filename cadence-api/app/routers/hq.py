@@ -17,7 +17,7 @@ from ..deps import current_hq_admin
 from ..models import DemoRequest, NotificationSettings, Pharmacy, PlatformAdmin, SupportTicket, UsageEvent, User
 from ..schemas import CamelModel
 from ..security import create_hq_token, verify_password
-from ..services.notify import send_email
+from ..services.notify import hq_log, numbers, send_email, send_sms
 from .support import CATEGORIES, TicketOut, ticket_out
 
 router = APIRouter(prefix="/hq", tags=["hq"])
@@ -253,6 +253,7 @@ async def tickets(status: str = "open", admin: PlatformAdmin = Depends(current_h
 class TicketUpdate(CamelModel):
     status: Literal["open", "acknowledged", "resolved"] | None = None
     reply: str | None = Field(default=None, max_length=2000)
+    text_reply: bool = False  # also send the reply by SMS to the callback number
 
 
 @router.patch("/tickets/{ticket_id}", response_model=HqTicket)
@@ -273,8 +274,17 @@ async def update_ticket(ticket_id: str, body: TicketUpdate, admin: PlatformAdmin
     ph = await db.get(Pharmacy, t.pharmacy_id)
     user = await db.get(User, t.user_id) if t.user_id else None
     if new_reply and user:  # let the person who asked know
-        await send_email(user.email, f"Cadence support: {CATEGORIES.get(t.category, 'your request')}",
-                         f"Hi {user.name.split()[0]},\n\n{t.reply}\n\nYou can also see this in Cadence under Get help.\n\nCadence support")
+        subject = f"Cadence support: {CATEGORIES.get(t.category, 'your request')}"
+        text = f"Hi {user.name.split()[0]},\n\n{t.reply}\n\nYou can also see this in Cadence under Get help.\n\nCadence support"
+        st, err = await send_email(user.email, subject, text)
+        hq_log(db, "email", user.email, text, st, err, "reply", subject)
+    if new_reply and body.text_reply and (to := numbers(t.phone or (user.phone if user else ""))):
+        sms = f"Cadence support: {t.reply}"
+        sms = sms if len(sms) <= 459 else sms[:400] + "... Full reply in Cadence > Get help."
+        st, err = await send_sms(to, sms)
+        hq_log(db, "sms", ", ".join(to), sms, st, err, "reply")
+    if new_reply:
+        await db.commit()
     return HqTicket(**ticket_out(t, user.name if user else "").model_dump(), pharmacy_id=str(t.pharmacy_id), pharmacy_name=ph.name if ph else "",
                     phone=t.phone, raised_by_email=user.email if user else "")
 

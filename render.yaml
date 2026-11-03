@@ -65,5 +65,7 @@ services:
         sync: false            # your inbox for "Get help" requests
       - key: HQ_NOTIFY_SMS
         sync: false            # your phone, texted for urgent help requests
+      - key: HQ_DIGEST_TIME
+        value: "08:00"         # daily HQ email (UTC = Ghana time)
       - key: DATA_ENCRYPTION_KEY
         sync: false

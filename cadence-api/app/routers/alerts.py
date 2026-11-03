@@ -10,7 +10,7 @@ from ..db import get_db
 from ..deps import can_see_finance, current_user, require
 from ..models import AlertRead, NotificationLog, NotificationSettings, Pharmacy, User
 from ..schemas import AlertOut, DeliveryOut, NotifySettingsIO, SendResult
-from ..services import notify
+from ..services import notify, reports
 from ..services.analytics import summarize
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -53,7 +53,12 @@ async def get_settings_route(user: User = Depends(current_user), db: AsyncSessio
 @router.put("/settings", response_model=NotifySettingsIO)
 async def save_settings(body: NotifySettingsIO, user: User = Depends(require("manage_alerts")), db: AsyncSession = Depends(get_db)):
     ns = await settings_for(db, user.pharmacy_id)
-    for k, v in body.model_dump().items():
+    # Only people in this pharmacy can be chosen as recipients.
+    team = {str(i) for i in (await db.scalars(select(User.id).where(User.pharmacy_id == user.pharmacy_id))).all()}
+    data = body.model_dump()
+    for k in ("sms_user_ids", "email_user_ids"):
+        data[k] = [i for i in dict.fromkeys(data[k]) if i in team]
+    for k, v in data.items():
         setattr(ns, k, v)
     await db.commit()
     return NotifySettingsIO.model_validate(ns)
@@ -62,9 +67,9 @@ async def save_settings(body: NotifySettingsIO, user: User = Depends(require("ma
 @router.post("/test-sms", response_model=SendResult)
 async def test_sms(user: User = Depends(require("manage_alerts")), db: AsyncSession = Depends(get_db)):
     ns = await settings_for(db, user.pharmacy_id)
-    to = notify.numbers(ns.sms_numbers)
+    to = [r.address for r in (await notify.recipients(db, ns, user.pharmacy_id))[0]]
     if not to:
-        raise HTTPException(400, "Add at least one phone number and save before sending a test.")
+        raise HTTPException(400, "Add a phone number or choose team members with a phone on their profile, then save before sending a test.")
     msg = f"Cadence test: SMS alerts for {(await db.get(Pharmacy, user.pharmacy_id)).name} are working."
     status, err = await notify.send_sms(to, msg)
     await notify.log(db, user.pharmacy_id, "sms", ", ".join(to), msg, status, err, "test")
@@ -75,13 +80,31 @@ async def test_sms(user: User = Depends(require("manage_alerts")), db: AsyncSess
 @router.post("/test-email", response_model=SendResult)
 async def test_email(user: User = Depends(require("manage_alerts")), db: AsyncSession = Depends(get_db)):
     ns = await settings_for(db, user.pharmacy_id)
-    if not ns.email:
-        raise HTTPException(400, "Add an email address and save before sending a test.")
-    subject, body = "Cadence test email", "Email alerts from Cadence are working. Your daily digest will arrive here."
-    status, err = await notify.send_email(ns.email, subject, body)
-    await notify.log(db, user.pharmacy_id, "email", ns.email, body, status, err, "test", subject)
+    to = [r.address for r in (await notify.recipients(db, ns, user.pharmacy_id))[1]]
+    if not to:
+        raise HTTPException(400, "Add an email address or choose team members, then save before sending a test.")
+    subject, body = "Cadence test email", "Email alerts from Cadence are working. Your daily digest and weekly report will arrive here."
+    sent, errors, status = 0, [], "sent"
+    for addr in to:
+        st, err = await notify.send_email(addr, subject, body)
+        await notify.log(db, user.pharmacy_id, "email", addr, body, st, err, "test", subject)
+        sent += st == "sent"
+        if st == "failed":
+            errors.append(f"{addr}: {err}")
+        status = "mock" if st == "mock" else status
     await db.commit()
-    return SendResult(channel="email", status=status, detail=err or ("Logged only: EMAIL_PROVIDER is mock." if status == "mock" else f"Sent to {ns.email}."))
+    if errors:
+        return SendResult(channel="email", status="failed", detail="; ".join(errors)[:500])
+    return SendResult(channel="email", status=status, detail="Logged only: EMAIL_PROVIDER is mock." if status == "mock" else f"Sent to {sent} address(es).")
+
+
+def _merge(channel: str, outcomes: list[tuple[str, str]]) -> SendResult | None:
+    """One result per channel: failed if any send failed, mock if in demo mode, otherwise sent."""
+    if not outcomes:
+        return None
+    errs = [e for st, e in outcomes if st == "failed"]
+    status = "failed" if errs else "mock" if any(st == "mock" for st, _ in outcomes) else "sent"
+    return SendResult(channel=channel, status=status, detail="; ".join(errs)[:500] if errs else f"{len(outcomes)} message(s)")
 
 
 async def _digest(db: AsyncSession, user: User, force: bool) -> list[SendResult]:
@@ -90,28 +113,69 @@ async def _digest(db: AsyncSession, user: User, force: bool) -> list[SendResult]
     if not force and ns.last_digest_on == today:
         return []
     s = await summarize(db, user)
-    alerts = notify.compute_alerts(s, ns)
-    results = []
-    if ns.sms_enabled and (to := notify.numbers(ns.sms_numbers)):
-        msg = notify.sms_text(s, ns)
-        if msg:
-            st, err = await notify.send_sms(to, msg)
-            await notify.log(db, user.pharmacy_id, "sms", ", ".join(to), msg, st, err, "digest")
-            results.append(SendResult(channel="sms", status=st, detail=err))
-    if ns.email_enabled and ns.email:
-        subject, body = notify.email_body(s, alerts)
-        st, err = await notify.send_email(ns.email, subject, body)
-        await notify.log(db, user.pharmacy_id, "email", ns.email, body, st, err, "digest", subject)
-        results.append(SendResult(channel="email", status=st, detail=err))
+    sms_to, email_to = await notify.recipients(db, ns, user.pharmacy_id)
+    results: list[SendResult] = []
+    if ns.sms_enabled and sms_to:
+        out = []
+        for fin in (True, False):  # people who can't see finance get the same text without money
+            group = [r.address for r in sms_to if r.finance == fin]
+            msg = notify.sms_text(s, ns, fin) if group else ""
+            if msg:
+                st, err = await notify.send_sms(group, msg)
+                await notify.log(db, user.pharmacy_id, "sms", ", ".join(group), msg, st, err, "digest")
+                out.append((st, err))
+        if r := _merge("sms", out):
+            results.append(r)
+    if ns.email_enabled and email_to:
+        note = await reports.priorities(s) if any(r.finance for r in email_to) else ""
+        out = []
+        for rcp in email_to:
+            subject, body = notify.email_body(s, notify.compute_alerts(s, ns, rcp.finance), rcp.finance, note if rcp.finance else "")
+            st, err = await notify.send_email(rcp.address, subject, body)
+            await notify.log(db, user.pharmacy_id, "email", rcp.address, body, st, err, "digest", subject)
+            out.append((st, err))
+        if r := _merge("email", out):
+            results.append(r)
     ns.last_digest_on = today
     await db.commit()
     return results
+
+
+async def _weekly(db: AsyncSession, user: User, force: bool) -> list[SendResult]:
+    """The weekly AI report goes to the alert email address and chosen team members who can see finance
+    (it's about sales and losses)."""
+    ns = await settings_for(db, user.pharmacy_id)
+    today = date.today()
+    if not force and (not ns.weekly_enabled or ns.last_weekly_on == today or today.weekday() != ns.weekly_day):
+        return []
+    to = [r for r in (await notify.recipients(db, ns, user.pharmacy_id))[1] if r.finance]
+    if not to:
+        if force:
+            raise HTTPException(400, "Add an alert email address, or choose team members who can see finance, then save.")
+        return []
+    s = await summarize(db, user)
+    subject, body, _ = await reports.weekly_report(s)
+    out = []
+    for rcp in to:
+        st, err = await notify.send_email(rcp.address, subject, body)
+        await notify.log(db, user.pharmacy_id, "email", rcp.address, body, st, err, "weekly", subject)
+        out.append((st, err))
+    ns.last_weekly_on = today
+    await db.commit()
+    r = _merge("email", out)
+    return [r] if r else []
 
 
 @router.post("/send-digest", response_model=list[SendResult])
 async def send_digest_now(user: User = Depends(require("manage_alerts")), db: AsyncSession = Depends(get_db)):
     """Send today's SMS + email digest now (ignores whether it already went out today)."""
     return await _digest(db, user, force=True)
+
+
+@router.post("/send-weekly", response_model=list[SendResult])
+async def send_weekly_now(user: User = Depends(require("manage_alerts")), db: AsyncSession = Depends(get_db)):
+    """Send this week's AI report now."""
+    return await _weekly(db, user, force=True)
 
 
 @router.post("/cron", response_model=dict)
@@ -122,15 +186,29 @@ async def cron(x_cron_secret: str = Header(default=""), db: AsyncSession = Depen
     if not secret or not hmac.compare_digest(x_cron_secret.encode(), secret.encode()):
         raise HTTPException(403, "Bad or missing X-Cron-Secret.")
     now = datetime.now(timezone.utc).strftime("%H:%M")
-    sent = 0
+    sent = weekly = 0
     for ph in (await db.scalars(select(Pharmacy))).all():
         ns = await settings_for(db, ph.id)
-        if ns.digest_time <= now and ns.last_digest_on != date.today():
-            admin = await db.scalar(select(User).where(User.pharmacy_id == ph.id, User.role == "Admin", User.status == "Active"))
-            if admin:
+        if ns.digest_time > now:
+            continue
+        due_digest = ns.last_digest_on != date.today()
+        due_weekly = ns.weekly_enabled and ns.last_weekly_on != date.today() and date.today().weekday() == ns.weekly_day
+        if not (due_digest or due_weekly):
+            continue
+        admin = await db.scalar(select(User).where(User.pharmacy_id == ph.id, User.role == "Admin", User.status == "Active"))
+        if not admin:
+            continue
+        try:  # one pharmacy's problem mustn't stop everyone else's digest
+            if due_digest:
                 sent += len(await _digest(db, admin, force=False))
+            if due_weekly:
+                weekly += len(await _weekly(db, admin, force=False))
+        except Exception:  # noqa: BLE001
+            await db.rollback()
     await db.commit()
-    return {"messages": sent}
+    from ..services import hq_digest  # late import: HQ code depends on this module's helpers
+    hq = await hq_digest.maybe_send(db)
+    return {"messages": sent, "weekly": weekly, "hq_digest": hq}
 
 
 @router.get("/deliveries", response_model=list[DeliveryOut])

@@ -6,13 +6,13 @@ from sqlalchemy import text
 
 from .config import get_settings
 from .db import engine
-from .routers import ai, alerts, analytics, auth, demo, hq, items, support, system, team
+from .routers import ai, alerts, analytics, auth, demo, hq, hq_comms, items, support, system, team
 
 settings = get_settings()
 # Refuse to run against a real database with the development signing key: anyone could forge logins.
 if not settings.database_url.startswith("sqlite") and (settings.jwt_secret == "dev-only-change-me" or len(settings.jwt_secret) < 32):
     raise RuntimeError("Set JWT_SECRET to a random value of at least 32 characters (Render generates one for you).")
-app = FastAPI(title="Cadence.io API", version="0.6.0", docs_url="/docs", redoc_url=None)
+app = FastAPI(title="Cadence.io API", version="0.7.0", docs_url="/docs", redoc_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,7 +47,7 @@ async def readable_validation_errors(_: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": f"{field}: {msg}", "errors": errors})
 
 
-for r in (auth.router, items.router, team.router, analytics.router, alerts.router, ai.router, demo.router, system.router, support.router, hq.router):
+for r in (auth.router, items.router, team.router, analytics.router, alerts.router, ai.router, demo.router, system.router, support.router, hq.router, hq_comms.router, hq_comms.pharmacy_router):
     app.include_router(r, prefix=settings.api_prefix)
 
 

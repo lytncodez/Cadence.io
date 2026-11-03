@@ -11,8 +11,12 @@ export interface AlertItem { key: string; type: "expiry" | "stock"; status: Stat
 export interface NotifySettings {
   smsEnabled: boolean; smsNumbers: string; emailEnabled: boolean; email: string; digestTime: string;
   onExpired: boolean; onCritical: boolean; onSoon: boolean; onLowStock: boolean;
+  /** Team members who also get alerts, using the phone/email on their profile. */
+  smsUserIds: string[]; emailUserIds: string[];
+  /** Weekly AI report by email. 0 = Monday ... 6 = Sunday. */
+  weeklyEnabled: boolean; weeklyDay: number;
 }
-export interface Delivery { id: string; channel: "sms" | "email"; recipient: string; subject: string; message: string; status: "sent" | "mock" | "failed"; error: string; kind: "digest" | "test" | "reset"; createdAt: string }
+export interface Delivery { id: string; channel: "sms" | "email"; recipient: string; subject: string; message: string; status: "sent" | "mock" | "failed"; error: string; kind: "digest" | "test" | "reset" | "weekly"; createdAt: string }
 export interface SendResult { channel: "sms" | "email" | "ai"; status: "sent" | "mock" | "failed"; detail: string }
 export type ItemInput = Omit<Item, "id" | "soldThisMonth" | "reorderLevel"> & { reorderLevel?: number; soldThisMonth?: number };
 export interface ParseResult { total: number; rows: ItemInput[]; errors: { row: number; error: string }[] }
@@ -24,6 +28,7 @@ export interface AskResult { kind: AskKind; text: string }
 const DEFAULT_NOTIFY: NotifySettings = {
   smsEnabled: true, smsNumbers: "+233 24 555 0142, +233 20 555 0198", emailEnabled: true, email: "alerts@harbourview.example",
   digestTime: "07:30", onExpired: true, onCritical: true, onSoon: false, onLowStock: true,
+  smsUserIds: [], emailUserIds: [], weeklyEnabled: true, weeklyDay: 0,
 };
 const nowStamp = () => { const d = new Date(); return d.toISOString().slice(0, 10) + "T" + d.toTimeString().slice(0, 5); };
 const current = () => { const s = getState(); return summarize(s.items, s.monthly, s.thresholds); };
@@ -118,6 +123,35 @@ export const alerts = {
     return out;
   },
 };
+/** Weekly AI report (demo mode writes it from the same template the server uses when AI is off). */
+export async function sendWeeklyReport(): Promise<SendResult[]> {
+  if (!USE_MOCK) return http("POST", "/alerts/send-weekly");
+  await delay(800);
+  const ns = await alerts.getSettings(), s = current(), ph = getState().pharmacy.name;
+  if (!ns.email) throw new Error("Add an alert email address, or choose team members who can see finance, then save.");
+  const k = s.kpi, crit = s.rows.filter((r) => r.status === "critical").slice(0, 3), exp = s.rows.filter((r) => r.status === "expired");
+  const lines = [
+    `Hello from Cadence. Here's ${ph}'s weekly report.`, "",
+    `${s.monthly[s.monthly.length - 1].label} sales so far are ${money(k.revenue)} at a ${k.margin.toFixed(1)}% margin. ${money(s.value.expired)} of stock has expired and ${money(s.value.critical)} expires soon.`, "",
+    crit.length ? `1. Dispense these first: ${crit.map((r) => `${r.name} batch ${r.batch}, ${r.days} days left`).join("; ")}.` : "1. Nothing is critical this week.",
+    exp.length ? `2. Quarantine and write off ${exp.length} expired batch${exp.length === 1 ? "" : "es"}; ask suppliers about returns.` : "2. No expired stock. Keep it that way.",
+    s.lowStock.length ? `3. Reorder: ${s.lowStock.slice(0, 3).map((p) => p.name).join(", ")}.` : "3. Everything is above its reorder level.",
+  ];
+  logMock({ channel: "email", recipient: ns.email, subject: `Cadence weekly report · ${ph}`, message: lines.join("\n"), kind: "weekly" });
+  return [{ channel: "email", status: "mock", detail: "" }];
+}
+
+/* ---------------- Announcements from the Cadence team ---------------- */
+export interface Announcement { id: string; title: string; message: string; createdAt: string }
+export const announcements = {
+  async list(): Promise<Announcement[]> {
+    if (!USE_MOCK) return http("GET", "/announcements");
+    // Demo: show what the HQ demo "sent" in this browser.
+    return storage.get<{ id: string; title: string; message: string; channels: string[]; createdAt: string }[]>("hq.broadcasts", [])
+      .filter((b) => b.channels.includes("in_app")).slice(0, 5).map(({ id, title, message, createdAt }) => ({ id, title, message, createdAt }));
+  },
+};
+
 function logMock(d: Omit<Delivery, "id" | "status" | "error" | "createdAt">) {
   const list = storage.get<Delivery[]>(V + "deliveries", []);
   storage.set(V + "deliveries", [{ ...d, id: Math.random().toString(36).slice(2), status: "mock", error: "", createdAt: nowStamp() }, ...list].slice(0, 20));

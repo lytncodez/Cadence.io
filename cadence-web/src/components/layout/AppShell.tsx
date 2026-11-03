@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Menu, MenuButton, MenuItem, MenuItems, Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 import {
   LuHouse, LuPackage, LuSparkles, LuBell, LuSettings, LuSearch, LuPanelLeftClose, LuPanelLeftOpen, LuSun, LuMoon, LuMonitor,
-  LuLogOut, LuUser, LuChevronsUpDown, LuStore, LuShieldCheck, LuArrowRight, LuScanLine,
+  LuLogOut, LuUser, LuChevronsUpDown, LuStore, LuShieldCheck, LuArrowRight, LuScanLine, LuMegaphone, LuX,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { Link, navigate, usePath } from "@/lib/router";
@@ -16,6 +16,7 @@ import { Avatar, Button, Kbd, Logo, StatusPill } from "@/components/ui/primitive
 import { CommandPalette } from "./CommandPalette";
 import { AddStockDialog } from "@/components/AddStockDialog";
 import { HelpDialog, HelpIcon } from "@/components/HelpDialog";
+import { announcements, type Announcement } from "@/lib/features";
 
 interface NavItem { to: string; label: string; icon: IconType; perm?: Permission; match: (p: string) => boolean }
 const NAV: NavItem[] = [
@@ -112,7 +113,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
             <span className="md:hidden"><UserMenu compact theme={theme} setTheme={setTheme} /></span>
           </div>
         </header>
-        <main className="mx-auto max-w-[1320px] px-4 pt-6 pb-28 md:px-8 md:pb-12">{children}</main>
+        <main className="mx-auto max-w-[1320px] px-4 pt-6 pb-28 md:px-8 md:pb-12"><Announcements />{children}</main>
       </div>
 
       {/* Mobile tab bar */}
@@ -199,5 +200,34 @@ function Notifications({ urgent }: { urgent: ReturnType<typeof summarize>["rows"
         <Link to="/app/alerts" className="flex items-center justify-center gap-1.5 border-t border-line py-3 text-sm font-medium text-brand-ink hover:bg-sunken rounded-b-2xl">See all alerts<LuArrowRight className="size-4" /></Link>
       </PopoverPanel>
     </Popover>
+  );
+}
+
+
+/** Messages from the Cadence team (sent from Cadence HQ). Dismissing one is remembered in this browser. */
+let annCache: { at: number; list: Announcement[] } | null = null;
+function Announcements() {
+  const [list, setList] = useState<Announcement[]>(annCache?.list ?? []);
+  const [hidden, setHidden] = useState<string[]>(() => storage.get<string[]>("announcements.dismissed", []));
+  useEffect(() => {
+    if (annCache && Date.now() - annCache.at < 5 * 60_000) return; // pages share one fetch every 5 minutes
+    announcements.list().then((l) => { annCache = { at: Date.now(), list: l }; setList(l); }, () => {});
+  }, []);
+  const shown = list.filter((a) => !hidden.includes(a.id)).slice(0, 2);
+  if (!shown.length) return null;
+  const dismiss = (id: string) => { const next = [...hidden, id].slice(-50); setHidden(next); storage.set("announcements.dismissed", next); };
+  return (
+    <div className="mb-5 grid gap-2">
+      {shown.map((a) => (
+        <div key={a.id} role="status" className="flex items-start gap-3 rounded-2xl border border-brand/30 bg-brand-soft/60 px-4 py-3 text-sm">
+          <LuMegaphone className="mt-0.5 size-4 shrink-0 text-brand-ink" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-ink">{a.title}<span className="ml-2 text-xs font-normal text-muted">From the Cadence team</span></p>
+            <p className="mt-0.5 whitespace-pre-line text-ink-2">{a.message}</p>
+          </div>
+          <button onClick={() => dismiss(a.id)} className="grid size-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface hover:text-ink" aria-label={`Dismiss ${a.title}`}><LuX className="size-4" /></button>
+        </div>
+      ))}
+    </div>
   );
 }
