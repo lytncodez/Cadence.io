@@ -15,6 +15,7 @@ import ResetPassword from "@/pages/ResetPassword";
 import Counter from "@/pages/Counter";
 import Signup from "@/pages/Signup";
 import Hq from "@/pages/hq/Hq";
+import ExpiryReport from "@/pages/ExpiryReport";
 
 /*  /            public website
     /login       sign in (and "forgot password")
@@ -58,6 +59,7 @@ function Routes() {
   // Each role gets its own home: counter staff see what to dispense and pull; owners and pharmacists see the business.
   if (p === "/app") return can("view_finance") ? <Overview /> : <Counter />;
   if (p === "/app/inventory") return <Inventory />;
+  if (p === "/app/print/expiry") return <ExpiryReport />;
   if (p === "/app/insights") return can("view_insights") ? <Insights /> : <Overview />;
   if (p === "/app/alerts") return <Alerts />;
   if (p === "/app/settings") return <Settings />;

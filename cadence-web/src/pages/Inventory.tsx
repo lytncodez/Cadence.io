@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
-import { LuSearch, LuPlus, LuScanLine, LuEllipsis, LuPencil, LuTrash2, LuLayers, LuChevronLeft, LuChevronRight, LuArrowUp, LuArrowDown, LuBarcode, LuX, LuPackage, LuTruck, LuCoins, LuUpload } from "react-icons/lu";
+import { LuSearch, LuPlus, LuScanLine, LuEllipsis, LuPencil, LuTrash2, LuLayers, LuChevronLeft, LuChevronRight, LuArrowUp, LuArrowDown, LuBarcode, LuX, LuPackage, LuTruck, LuCoins, LuUpload, LuPrinter } from "react-icons/lu";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge, Button, Card, EmptyState, Input, StatusPill, dot } from "@/components/ui/primitives";
 import { Drawer, Modal, useToast } from "@/components/ui/overlay";
@@ -96,6 +96,7 @@ export default function Inventory() {
         </div>
         <div className="flex gap-2">
           <Button onClick={() => setScanOpen(true)}><LuScanLine />Scan barcode</Button>
+          <Button onClick={() => navigate(`/app/print/expiry?show=${status === "soon" ? "expired,critical,soon" : "expired,critical"}`)} title="Print the expired and critical batches"><LuPrinter />Print</Button>
           {can("import") && <Button onClick={() => setImportOpen(true)}><LuUpload />Import</Button>}
           {can("edit_inventory") && <Button variant="primary" onClick={() => setAddOpen(true)}><LuPlus />Add stock</Button>}
         </div>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogBackdrop, DialogPanel } from "@headlessui/react";
-import { LuSearch, LuHouse, LuPackage, LuUser, LuSparkles, LuBell, LuSettings, LuPlus, LuSun, LuMoon, LuLogOut, LuCornerDownLeft, LuPill, LuUpload } from "react-icons/lu";
+import { LuSearch, LuHouse, LuPackage, LuUser, LuSparkles, LuBell, LuSettings, LuPlus, LuSun, LuMoon, LuLogOut, LuCornerDownLeft, LuPill, LuUpload, LuPrinter } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { navigate } from "@/lib/router";
 import { auth, useCan, useStore } from "@/lib/api";
@@ -26,6 +26,7 @@ export function CommandPalette({ open, onClose, onTheme, onAddStock }: { open: b
       { id: "nav-alerts", group: "Go to", label: "Alerts", icon: LuBell, run: go("/app/alerts") },
       { id: "nav-set", group: "Go to", label: "Settings", icon: LuSettings, run: go("/app/settings") },
       { id: "nav-me", group: "Go to", label: "My profile", icon: LuUser, run: go("/app/profile") },
+      { id: "act-print", group: "Actions", label: "Print expiry report (expired + critical)", icon: LuPrinter, keywords: "pdf print report expired critical", run: go("/app/print/expiry") },
       ...(can("import") ? [{ id: "act-import", group: "Actions", label: "Import stock from CSV / Excel", icon: LuUpload, run: go("/app/inventory?import=1") }] : []),
       ...(can("edit_inventory") ? [{ id: "act-add", group: "Actions", label: "Add stock", hint: "N", icon: LuPlus, run: onAddStock }] : []),
       { id: "act-light", group: "Actions", label: "Switch to light theme", icon: LuSun, run: () => onTheme("light") },
