@@ -15,6 +15,7 @@ import type { Permission } from "@/lib/types";
 import { Avatar, Button, Kbd, Logo, StatusPill } from "@/components/ui/primitives";
 import { CommandPalette } from "./CommandPalette";
 import { AddStockDialog } from "@/components/AddStockDialog";
+import { HelpDialog, HelpIcon } from "@/components/HelpDialog";
 
 interface NavItem { to: string; label: string; icon: IconType; perm?: Permission; match: (p: string) => boolean }
 const NAV: NavItem[] = [
@@ -31,6 +32,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
   const [collapsed, setCollapsed] = useState(() => storage.get("sidebar.collapsed", false));
   const [cmdOpen, setCmdOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [theme, setTheme] = useTheme();
   const items = useStore((s) => s.items);
   const monthly = useStore((s) => s.monthly);
@@ -105,6 +107,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
               <LuSearch className="size-4" /><span className="flex-1 text-left">Search batches or pages</span><Kbd>⌘K</Kbd>
             </button>
             <Button variant="ghost" size="icon" className="ml-auto lg:hidden" onClick={() => setCmdOpen(true)} aria-label="Search"><LuSearch /></Button>
+            <Button variant="ghost" size="sm" onClick={() => setHelpOpen(true)} className="text-ink-2" aria-label="Get help" title="Get help from Cadence"><HelpIcon className="size-[18px]" /><span className="hidden sm:inline">Get help</span></Button>
             <Notifications urgent={urgent} />
             <span className="md:hidden"><UserMenu compact theme={theme} setTheme={setTheme} /></span>
           </div>
@@ -127,6 +130,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onTheme={setTheme} onAddStock={() => setAddOpen(true)} />
       <AddStockDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

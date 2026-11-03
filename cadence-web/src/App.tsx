@@ -14,6 +14,7 @@ import Settings from "@/pages/Settings";
 import ResetPassword from "@/pages/ResetPassword";
 import Counter from "@/pages/Counter";
 import Signup from "@/pages/Signup";
+import Hq from "@/pages/hq/Hq";
 
 /*  /            public website
     /login       sign in (and "forgot password")
@@ -46,6 +47,7 @@ function Routes() {
   }, [user, p, inApp]);
 
   if (p === "/") return <Website />;
+  if (p === "/hq" || p.startsWith("/hq/")) return <Hq path={path} />;  // Cadence HQ: separate login, no pharmacy data
   if (p === "/login") return user ? null : <Login />;
   if (p === "/reset-password") return <ResetPassword />;
   if (p === "/signup") return user ? null : <Signup />;

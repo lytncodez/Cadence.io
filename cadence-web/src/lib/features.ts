@@ -357,3 +357,34 @@ export const integrations = {
     return { channel: "ai", status: "mock", detail: "Demo mode: connect the API with an AI key to test it." };
   },
 };
+
+/* ---------------- Get help (distress button) ---------------- */
+export type HelpCategory = "cant_dispense" | "login" | "alerts" | "data" | "bug" | "question";
+export const HELP_CATEGORIES: Record<HelpCategory, string> = {
+  cant_dispense: "Can't dispense or see stock", login: "Someone can't log in", alerts: "SMS or email alerts not arriving",
+  data: "Numbers or stock look wrong", bug: "Something is broken", question: "Question or request",
+};
+export interface HelpTicket { id: string; category: HelpCategory; categoryLabel: string; urgency: "normal" | "urgent"; message: string; status: "open" | "acknowledged" | "resolved"; reply: string; createdAt: string; updatedAt: string; raisedBy: string }
+/** Demo mode keeps requests in this browser so the HQ preview can show them too. */
+export type MockTicket = HelpTicket & { pharmacyName: string; phone: string; raisedByEmail: string; pharmacyId: string };
+export const mockTickets = {
+  all: (): MockTicket[] => storage.get<MockTicket[]>(V + "tickets", []),
+  save: (t: MockTicket[]) => storage.set(V + "tickets", t),
+};
+export const help = {
+  async raise(d: { category: HelpCategory; urgency: "normal" | "urgent"; message: string; phone: string }): Promise<HelpTicket> {
+    if (!USE_MOCK) return http("POST", "/support/tickets", d);
+    await delay(600);
+    const s = getState(), me = s.users.find((u) => u.id === s.session?.userId);
+    const stamp = nowStamp();
+    const t = { id: "tkt_" + Date.now().toString(36), ...d, categoryLabel: HELP_CATEGORIES[d.category], status: "open" as const, reply: "", createdAt: stamp, updatedAt: stamp,
+      raisedBy: me?.name ?? "", raisedByEmail: me?.email ?? "", pharmacyName: s.pharmacy.name, pharmacyId: "this-browser", phone: d.phone || me?.phone || "" };
+    mockTickets.save([t, ...mockTickets.all()]);
+    return t;
+  },
+  async mine(): Promise<HelpTicket[]> {
+    if (!USE_MOCK) return http("GET", "/support/tickets");
+    await delay(200);
+    return mockTickets.all();
+  },
+};

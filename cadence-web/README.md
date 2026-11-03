@@ -52,7 +52,7 @@ Everyone signs in at `/login` and lands on the home built for their job:
 3. Environment variables: `VITE_USE_MOCK=false`, `VITE_API_URL=https://<your-api>.onrender.com/api/v1`.
 4. Deploy. `vercel.json` rewrites every route to `index.html` (so `/app/inventory?status=critical` works) and sets security headers.
 
-Routes: `/` website · `/signup` create a pharmacy account · `/login` · `/reset-password?token=…` (reset and invite links) · `/app/...`.
+Routes: `/` website · `/signup` create a pharmacy account · `/login` · `/reset-password?token=…` (reset and invite links) · `/app/...` · `/hq` Cadence HQ (separate login; demo mode: hq@cadence.example / cadence-hq-2026).
 
 ## Connecting the backend
 Set `VITE_USE_MOCK=false` and `VITE_API_URL`. The app expects:

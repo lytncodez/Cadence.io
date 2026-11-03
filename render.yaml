@@ -61,5 +61,9 @@ services:
         sync: false
       - key: SIGNUP_ENABLED
         value: "true"
+      - key: HQ_NOTIFY_EMAIL
+        sync: false            # your inbox for "Get help" requests
+      - key: HQ_NOTIFY_SMS
+        sync: false            # your phone, texted for urgent help requests
       - key: DATA_ENCRYPTION_KEY
         sync: false
