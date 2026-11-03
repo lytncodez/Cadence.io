@@ -40,6 +40,10 @@ async def user_perms(db: AsyncSession, user: User) -> set[str]:
     return set(role.perms) if role else set()
 
 
+async def can_see_finance(db: AsyncSession, user: User) -> bool:
+    return "view_finance" in await user_perms(db, user)
+
+
 def require(*perms: str) -> Callable:
     """Dependency: the signed-in user's role must grant at least one of `perms`."""
 

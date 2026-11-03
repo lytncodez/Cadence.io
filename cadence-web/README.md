@@ -34,14 +34,25 @@ src/
   pages/                   Website, Login, Overview, Inventory, Insights, Alerts, Settings, Profile
 ```
 
+## Roles
+Everyone signs in at `/login` and lands on the home built for their job:
+- **Admin**: Overview (sales, margins, expiry) plus *Your team* and a setup checklist.
+- **Pharmacist**: Overview plus *Reorder soon*.
+- **Dispenser** (no `view_finance`): **Counter**: scan or type a medicine, see which batch to hand over, what to pull from the shelf and what's running low. No cost prices, margins, revenue or stock values: the API doesn't send them, and the app hides those columns.
+
+## Security
+`vercel.json` sets HSTS, a Content-Security-Policy (no inline scripts: the pre-paint theme code lives in `public/theme-init.js`), `X-Frame-Options: DENY`, `nosniff` and a strict referrer policy.
+
 ## Keyboard
 `⌘K` / `Ctrl K` or `/` opens the command bar · `N` adds stock · `Esc` closes dialogs.
 
 ## Deploy to Vercel
-1. Push this folder to GitHub.
-2. Vercel → New Project → import the repo. Framework is detected as Vite.
-3. Add the environment variables from `.env.example`. Keep `VITE_USE_MOCK=true` until the API is live on Render.
-4. Deploy. `vercel.json` rewrites every route to `index.html` so deep links like `/inventory` work.
+1. Vercel → **Add New → Project** → import the GitHub repo.
+2. **Root Directory** → `cadence-web` (the repo also holds `cadence-api`).
+3. Environment variables: `VITE_USE_MOCK=false`, `VITE_API_URL=https://<your-api>.onrender.com/api/v1`.
+4. Deploy. `vercel.json` rewrites every route to `index.html` (so `/app/inventory?status=critical` works) and sets security headers.
+
+Routes: `/` website · `/signup` create a pharmacy account · `/login` · `/reset-password?token=…` (reset and invite links) · `/app/...`.
 
 ## Connecting the backend
 Set `VITE_USE_MOCK=false` and `VITE_API_URL`. The app expects:

@@ -21,6 +21,7 @@ export default function Inventory() {
   const items = useStore((s) => s.items);
   const thresholds = useStore((s) => s.thresholds);
   const can = useCan();
+  const finance = can("view_finance");
   const toast = useToast();
 
   const [q, setQ] = useState("");
@@ -143,7 +144,7 @@ export default function Inventory() {
                     <th className="px-4 py-3 text-left">Batch</th>
                     <SortHead k="qty" className="text-right">Stock</SortHead>
                     <SortHead k="expiry">Expiry</SortHead>
-                    <SortHead k="value" className="text-right">Value</SortHead>
+                    {finance && <SortHead k="value" className="text-right">Value</SortHead>}
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="w-12" />
                   </tr>
@@ -160,7 +161,7 @@ export default function Inventory() {
                       <td className="px-4 py-3"><span className="font-mono text-[13px]">{r.batch}</span><p className="font-mono text-[11px] text-muted">{r.barcode}</p></td>
                       <td className="px-4 py-3 text-right"><StockBar qty={r.qty} level={r.reorderLevel} /></td>
                       <td className="px-4 py-3"><p className="tabular">{fmtDate(r.expiry)}</p><p className={cn("text-xs", r.status === "critical" ? "font-medium text-critical-ink" : "text-muted")}>{relDays(r.days)}</p></td>
-                      <td className="px-4 py-3 text-right tabular">{money(r.qty * r.unitCost, 0)}</td>
+                      {finance && <td className="px-4 py-3 text-right tabular">{money(r.qty * r.unitCost, 0)}</td>}
                       <td className="px-4 py-3"><StatusPill status={r.status} /></td>
                       <td className="px-2" onClick={(e) => e.stopPropagation()}><RowMenu row={r} onEdit={() => setEditing(r)} onDelete={() => remove([r.id])} onOpen={() => setDetail(r.id)} /></td>
                     </tr>
@@ -200,7 +201,7 @@ export default function Inventory() {
         )}
       </Card>
 
-      <BatchDrawer row={detailRow} rows={rows} onClose={() => setDetail(null)} onEdit={(r) => { setEditing(r); }} onDelete={(r) => remove([r.id])} onPick={setDetail} canEdit={can("edit_inventory")} canDelete={can("delete_inventory")} />
+      <BatchDrawer row={detailRow} rows={rows} onClose={() => setDetail(null)} onEdit={(r) => { setEditing(r); }} onDelete={(r) => remove([r.id])} onPick={setDetail} canEdit={can("edit_inventory")} canDelete={can("delete_inventory")} finance={finance} />
       <AddStockDialog open={addOpen || !!editing} edit={editing} onClose={() => { setAddOpen(false); setEditing(null); }} />
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <ScanDialog open={scanOpen} onClose={() => setScanOpen(false)} rows={rows} onPick={(id) => { setScanOpen(false); setDetail(id); }} />
@@ -233,8 +234,8 @@ function RowMenu({ row, onEdit, onDelete, onOpen }: { row: Batch; onEdit: () => 
   );
 }
 
-function BatchDrawer({ row, rows, onClose, onEdit, onDelete, onPick, canEdit, canDelete }: {
-  row: Batch | null; rows: Batch[]; onClose: () => void; onEdit: (r: Batch) => void; onDelete: (r: Batch) => void; onPick: (id: string) => void; canEdit: boolean; canDelete: boolean;
+function BatchDrawer({ row, rows, onClose, onEdit, onDelete, onPick, canEdit, canDelete, finance }: {
+  row: Batch | null; rows: Batch[]; onClose: () => void; onEdit: (r: Batch) => void; onDelete: (r: Batch) => void; onPick: (id: string) => void; canEdit: boolean; canDelete: boolean; finance: boolean;
 }) {
   const [last, setLast] = useState<Batch | null>(row);
   useEffect(() => { if (row) setLast(row); }, [row]);
@@ -264,9 +265,9 @@ function BatchDrawer({ row, rows, onClose, onEdit, onDelete, onPick, canEdit, ca
               [<LuBarcode key="b" />, "Barcode", <span key="v" className="font-mono">{r.barcode}</span>],
               [<LuLayers key="l" />, "Batch", <span key="v" className="font-mono">{r.batch}</span>],
               [<LuPackage key="p" />, "Units", int(r.qty)],
-              [<LuCoins key="c" />, "Value at cost", money(r.qty * r.unitCost, 0)],
+              ...(finance ? [[<LuCoins key="c" />, "Value at cost", money(r.qty * r.unitCost, 0)]] : []),
               [<LuTruck key="t" />, "Supplier", r.supplier],
-              [<LuCoins key="m" />, "Price / cost", `${money(r.unitPrice)} / ${money(r.unitCost)}`],
+              finance ? [<LuCoins key="m" />, "Price / cost", `${money(r.unitPrice)} / ${money(r.unitCost)}`] : [<LuCoins key="m" />, "Selling price", money(r.unitPrice)],
             ].map(([icon, k, v], i) => (
               <div key={i} className="rounded-xl border border-line p-3">
                 <dt className="flex items-center gap-1.5 text-xs text-muted [&_svg]:size-3.5">{icon}{k}</dt>

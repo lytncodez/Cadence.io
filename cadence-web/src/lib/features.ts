@@ -1,7 +1,7 @@
 /* Alerts, notifications, AI insights, import and pharmacy settings.
    Mock mode mirrors the API's rules (cadence-api/app/services/*) so both behave the same. */
 import { z } from "zod";
-import { delay, getState, http, set, USE_MOCK, V, type Pharmacy } from "./api";
+import { api, currentPerms, delay, getState, http, set, USE_MOCK, V, type Pharmacy } from "./api";
 import { summarize, type Summary } from "./analytics";
 import { daysUntil, fmtDate, money, storage } from "./utils";
 import type { Item, Status } from "./types";
@@ -13,7 +13,7 @@ export interface NotifySettings {
   onExpired: boolean; onCritical: boolean; onSoon: boolean; onLowStock: boolean;
 }
 export interface Delivery { id: string; channel: "sms" | "email"; recipient: string; subject: string; message: string; status: "sent" | "mock" | "failed"; error: string; kind: "digest" | "test" | "reset"; createdAt: string }
-export interface SendResult { channel: "sms" | "email"; status: "sent" | "mock" | "failed"; detail: string }
+export interface SendResult { channel: "sms" | "email" | "ai"; status: "sent" | "mock" | "failed"; detail: string }
 export type ItemInput = Omit<Item, "id" | "soldThisMonth" | "reorderLevel"> & { reorderLevel?: number; soldThisMonth?: number };
 export interface ParseResult { total: number; rows: ItemInput[]; errors: { row: number; error: string }[] }
 export interface Dataset { name: string; rows: ItemInput[]; kept: boolean; file?: File }
@@ -29,12 +29,13 @@ const nowStamp = () => { const d = new Date(); return d.toISOString().slice(0, 1
 const current = () => { const s = getState(); return summarize(s.items, s.monthly, s.thresholds); };
 
 /* ---------------- Alerts ---------------- */
-export function computeAlerts(s: Summary, ns: NotifySettings, read: Set<string>): AlertItem[] {
+export function computeAlerts(s: Summary, ns: NotifySettings, read: Set<string>, finance = true): AlertItem[] {
   const out: AlertItem[] = [];
   s.rows.forEach((r) => {
     if (r.status === "expired" || r.status === "critical" || (r.status === "soon" && ns.onSoon)) {
       const text = r.status === "expired"
-        ? `Batch ${r.batch} expired ${fmtDate(r.expiry)}. Quarantine ${r.qty} units (${money(r.qty * r.unitCost)} at cost) and record the write-off.`
+        ? finance ? `Batch ${r.batch} expired ${fmtDate(r.expiry)}. Quarantine ${r.qty} units (${money(r.qty * r.unitCost)} at cost) and record the write-off.`
+          : `Batch ${r.batch} expired ${fmtDate(r.expiry)}. Quarantine ${r.qty} units and tell the pharmacist.`
         : r.status === "critical" ? `Batch ${r.batch} expires in ${r.days} days. ${r.qty} units left; dispense these first.`
         : `Batch ${r.batch} expires in ${r.days} days. ${r.qty} units on hand.`;
       const key = `exp-${r.id}-${r.status}`;
@@ -63,7 +64,7 @@ export const alerts = {
   async list(): Promise<AlertItem[]> {
     if (!USE_MOCK) return http("GET", "/alerts");
     const read = new Set(storage.get<string[]>(V + "alertReads", []));
-    return computeAlerts(current(), await alerts.getSettings(), read);
+    return computeAlerts(current(), await alerts.getSettings(), read, currentPerms().has("view_finance"));
   },
   async markRead(keys: string[]) {
     if (!USE_MOCK) return http("POST", "/alerts/read", keys);
@@ -264,7 +265,13 @@ export async function parseFile(file: File): Promise<ParseResult> {
 }
 
 export async function importFile(file: File, dryRun: boolean): Promise<ImportResult> {
-  if (!USE_MOCK) { const fd = new FormData(); fd.append("file", file); return http("POST", `/items/import?dry_run=${dryRun}`, fd); }
+  if (!USE_MOCK) {
+    const fd = new FormData(); fd.append("file", file);
+    const r = await http<ImportResult>("POST", `/items/import?dry_run=${dryRun}`, fd);
+    // Show the new batches straight away (and any sales the file carried) without a page refresh.
+    if (!dryRun && r.added + r.updated > 0) await api.loadAll();
+    return r;
+  }
   const parsed = await parseLocal(file);
   const good = parsed.rows, errors = parsed.errors;
   let added = 0, updated = 0;
@@ -329,3 +336,24 @@ export async function submitDemoRequest(d: DemoRequestInput) {
   await delay(600);
   if (!d.website) storage.set("demoRequests", [...storage.get<DemoRequestInput[]>("demoRequests", []), { ...d, at: new Date().toISOString() }]);
 }
+
+/* ---------------- Integrations (server settings) ---------------- */
+export interface Integration { provider: string; status: "live" | "demo" | "needs_setup"; detail: string }
+export interface Integrations { sms: Integration; email: Integration; ai: Integration; digest: Integration; encryption: Integration }
+export const integrations = {
+  async get(): Promise<Integrations> {
+    if (!USE_MOCK) return http("GET", "/integrations");
+    await delay(250);
+    const demo = (detail: string): Integration => ({ provider: "mock", status: "demo", detail });
+    return {
+      sms: demo("Demo mode: messages are logged, not sent."), email: demo("Demo mode: emails are logged, not sent."),
+      ai: demo("Built-in wording for stock questions; general questions are off."),
+      digest: demo("The browser demo has no scheduler."), encryption: demo("Demo data lives only in this browser."),
+    };
+  },
+  async testAi(): Promise<SendResult> {
+    if (!USE_MOCK) return http("POST", "/integrations/test-ai");
+    await delay(400);
+    return { channel: "ai", status: "mock", detail: "Demo mode: connect the API with an AI key to test it." };
+  },
+};

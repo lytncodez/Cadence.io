@@ -23,7 +23,7 @@ let state: State = {
   items: USE_MOCK ? storage.get(V + "items", seedItems()) : [],
   users: USE_MOCK ? storage.get(V + "users", seedUsers()) : [],
   roles: USE_MOCK ? storage.get(V + "roles", seedRoles()) : [],
-  monthly: seedMonthly(),
+  monthly: USE_MOCK ? storage.get(V + "monthly", seedMonthly()) : [],
   thresholds: storage.get(V + "thresholds", DEFAULT_THRESHOLDS),
   pharmacy: USE_MOCK ? storage.get(V + "pharmacy", PHARMACY) : { name: "", location: "" },
   session: storage.get<Session | null>(V + "session", null),
@@ -79,7 +79,9 @@ const mockResets = {
 };
 const newToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
 export const resetLink = (token: string) => `${location.origin}${import.meta.env.VITE_ROUTER === "hash" ? location.pathname + "#" : ""}/reset-password?token=${token}`;
-export interface ResetCheck { valid: boolean; name: string; email: string }
+export interface ResetCheck { valid: boolean; name: string; email: string; invite?: boolean; pharmacy?: string }
+export interface SignupInput { pharmacyName: string; location: string; licenceNo: string; name: string; position: string; email: string; phone: string; password: string; website: string }
+export interface InviteInput { name: string; email: string; role: string; position: string; department: string; phone: string }
 export interface ResetLinkResult { status: "sent" | "mock" | "failed"; detail: string; email: string; link: string | null; expiresMinutes: number }
 
 export const auth = {
@@ -101,6 +103,27 @@ export const auth = {
   },
   logout() { set({ session: null }, ["session"]); },
 
+  /** A new pharmacy creates its own account; its first admin is signed in straight away. */
+  async signup(d: SignupInput) {
+    if (!USE_MOCK) {
+      const r = await http<{ access_token: string; user: User }>("POST", "/auth/signup", { ...d, email: d.email.trim().toLowerCase() });
+      set({ session: { userId: r.user.id, token: r.access_token, user: r.user }, ready: false }, ["session"]);
+      await api.loadAll();
+      return r.user;
+    }
+    // Demo mode keeps one pharmacy per browser: signing up swaps the sample pharmacy for a new, empty one.
+    await delay(700);
+    const now = todayISO() + "T" + new Date().toTimeString().slice(0, 5);
+    const admin: User = { id: "usr_" + Date.now().toString(36), name: d.name.trim(), email: d.email.trim().toLowerCase(), role: "Admin", status: "Active",
+      position: d.position.trim() || "Pharmacy Manager", staffId: "ADM-001", phone: d.phone.trim(), department: "Management", regNo: "",
+      joined: todayISO(), lastLogin: now, photo: "", bio: "" };
+    setMockPassword(admin.id, d.password);
+    set({ items: [], users: [admin], roles: seedRoles(), monthly: emptyMonths(), thresholds: DEFAULT_THRESHOLDS,
+      pharmacy: { name: d.pharmacyName.trim(), location: d.location.trim(), licenceNo: d.licenceNo.trim() },
+      session: { userId: admin.id, token: "mock-" + admin.id } }, ["items", "users", "roles", "monthly", "thresholds", "pharmacy", "session"]);
+    return admin;
+  },
+
   /** Always resolves the same way whether or not the email has an account. Demo mode also returns the link, since no email is sent. */
   async forgotPassword(email: string): Promise<{ demoLink?: string }> {
     email = email.trim().toLowerCase();
@@ -117,7 +140,7 @@ export const auth = {
     if (!USE_MOCK) return http<ResetCheck>("GET", `/auth/reset-password/${encodeURIComponent(token)}`);
     await delay(300);
     const r = mockResets.get(token), u = r && r.expires > Date.now() ? state.users.find((x) => x.id === r.userId) : undefined;
-    return u ? { valid: true, name: u.name.split(" ")[0], email: u.email } : { valid: false, name: "", email: "" };
+    return u ? { valid: true, name: u.name.split(" ")[0], email: u.email, invite: u.status === "Invited", pharmacy: state.pharmacy.name } : { valid: false, name: "", email: "" };
   },
   async resetPassword(token: string, password: string) {
     if (!USE_MOCK) { await http("POST", "/auth/reset-password", { token, password }); set({ session: null }, ["session"]); return; }
@@ -125,7 +148,7 @@ export const auth = {
     const r = mockResets.get(token);
     if (!r || r.expires < Date.now()) throw new Error("This reset link has expired or was already used. Ask for a new one.");
     setMockPassword(r.userId, password); mockResets.delete(token);
-    set({ session: null }, ["session"]);
+    set({ session: null, users: state.users.map((u) => (u.id === r.userId && u.status === "Invited" ? { ...u, status: "Active" as const } : u)) }, ["session", "users"]);
   },
 };
 export function useCurrentUser(): User | null {
@@ -140,19 +163,39 @@ export function useCan() {
   return (p: Permission) => !!role?.perms.includes(p);
 }
 
+/** Permissions of whoever is signed in (outside React). */
+export function currentPerms(): Set<Permission> {
+  const id = state.session?.userId;
+  const u = state.users.find((x) => x.id === id) ?? state.session?.user;
+  return new Set(state.roles.find((r) => r.name === u?.role)?.perms ?? []);
+}
+/** Six empty months, for roles that aren't allowed to see sales figures. */
+function emptyMonths(): Month[] {
+  const d = new Date();
+  return Array.from({ length: 6 }, (_, i) => {
+    const m = new Date(d.getFullYear(), d.getMonth() - 5 + i, 1);
+    return { label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m.getMonth()], year: m.getFullYear(), revenue: 0, cost: 0 };
+  });
+}
+/** The API leaves unitCost out (null) for roles without view_finance; the app treats it as 0 and hides money. */
+const normItem = (i: Item): Item => ({ ...i, unitCost: i.unitCost ?? 0 });
+
 /* ---------------- Data ---------------- */
 export const api = {
   async loadAll() {
     if (USE_MOCK) return;
     if (!state.session) return;
-    const [items, users, roles, monthly, ph] = await Promise.all([
-      http<Item[]>("GET", "/items"), http<User[]>("GET", "/users"), http<Role[]>("GET", "/roles"), http<Month[]>("GET", "/analytics/monthly"),
+    const [items, users, roles, ph] = await Promise.all([
+      http<Item[]>("GET", "/items"), http<User[]>("GET", "/users"), http<Role[]>("GET", "/roles"),
       http<Pharmacy & { criticalDays: number; soonDays: number }>("GET", "/pharmacy"),
     ]);
-    set({ items, users, roles, monthly, pharmacy: ph, thresholds: { criticalMax: ph.criticalDays, soonMax: ph.soonDays }, ready: true });
+    const me = users.find((u) => u.id === state.session?.userId);
+    const finance = !!roles.find((r) => r.name === me?.role)?.perms.includes("view_finance");
+    const monthly = finance ? await http<Month[]>("GET", "/analytics/monthly") : emptyMonths();
+    set({ items: items.map(normItem), users, roles, monthly, pharmacy: ph, thresholds: { criticalMax: ph.criticalDays, soonMax: ph.soonDays }, ready: true });
   },
   async createItem(data: Omit<Item, "id" | "soldThisMonth" | "reorderLevel"> & Partial<Item>) {
-    if (!USE_MOCK) { const it = await http<Item>("POST", "/items", data); set({ items: [it, ...state.items] }); return it; }
+    if (!USE_MOCK) { const it = normItem(await http<Item>("POST", "/items", data)); set({ items: [it, ...state.items] }); return it; }
     await delay(350);
     if (state.items.some((i) => i.barcode === data.barcode && i.batch.toLowerCase() === data.batch.toLowerCase()))
       throw new Error(`Batch ${data.batch} already exists for this barcode. Edit that row instead.`);
@@ -161,7 +204,7 @@ export const api = {
     return it;
   },
   async updateItem(id: string, data: Partial<Item>) {
-    if (!USE_MOCK) { const it = await http<Item>("PATCH", `/items/${id}`, data); set({ items: state.items.map((i) => (i.id === id ? it : i)) }); return it; }
+    if (!USE_MOCK) { const it = normItem(await http<Item>("PATCH", `/items/${id}`, data)); set({ items: state.items.map((i) => (i.id === id ? it : i)) }); return it; }
     await delay(250);
     set({ items: state.items.map((i) => (i.id === id ? { ...i, ...data } : i)) }, ["items"]);
   },
@@ -189,6 +232,24 @@ export const api = {
     if (current !== demoPassword(id)) throw new Error("Your current password is incorrect.");
     setMockPassword(id, next);
   },
+  /** Admin: add someone to the pharmacy. They get an email link to set their password; if it isn't delivered, the link comes back. */
+  async inviteUser(d: InviteInput): Promise<{ user: User; delivery: ResetLinkResult }> {
+    if (!USE_MOCK) {
+      const r = await http<{ user: User; delivery: ResetLinkResult }>("POST", "/users", { ...d, email: d.email.trim().toLowerCase() });
+      set({ users: [...state.users, r.user] });
+      return r;
+    }
+    await delay(500);
+    const email = d.email.trim().toLowerCase();
+    if (state.users.some((u) => u.email.toLowerCase() === email)) throw new Error("That email already has a Cadence account. Each person signs in with their own email.");
+    const user: User = { id: "usr_" + Date.now().toString(36), name: d.name.trim(), email, role: d.role, status: "Invited", position: d.position.trim(),
+      staffId: `STF-${String(state.users.length + 1).padStart(3, "0")}`, phone: d.phone.trim(), department: d.department.trim(), regNo: "",
+      joined: todayISO(), lastLogin: "", photo: "", bio: "" };
+    const token = newToken();
+    mockResets.set(token, { userId: user.id, expires: Date.now() + 72 * 3600_000 });
+    set({ users: [...state.users, user] }, ["users"]);
+    return { user, delivery: { status: "mock", detail: "", email, link: resetLink(token), expiresMinutes: 72 * 60 } };
+  },
   /** Admin: email a team member a link to set a new password. If the email wasn't delivered, the link comes back to share in person. */
   async sendReset(userId: string): Promise<ResetLinkResult> {
     if (!USE_MOCK) return http<ResetLinkResult>("POST", `/users/${userId}/send-reset`);
@@ -196,11 +257,12 @@ export const api = {
     const u = state.users.find((x) => x.id === userId)!;
     const token = newToken();
     mockResets.clearUser(userId);
-    mockResets.set(token, { userId, expires: Date.now() + 60 * 60_000 });
-    return { status: "mock", detail: "", email: u.email, link: resetLink(token), expiresMinutes: 60 };
+    const minutes = u.status === "Invited" ? 72 * 60 : 60;
+    mockResets.set(token, { userId, expires: Date.now() + minutes * 60_000 });
+    return { status: "mock", detail: "", email: u.email, link: resetLink(token), expiresMinutes: minutes };
   },
   resetDemo() {
-    ["items", "users", "roles", "thresholds", "pharmacy", "notify", "deliveries", "alertReads", "passwords"].forEach((k) => storage.remove(V + k));
-    set({ items: seedItems(), users: seedUsers(), roles: seedRoles(), thresholds: DEFAULT_THRESHOLDS, pharmacy: PHARMACY });
+    ["items", "users", "roles", "monthly", "thresholds", "pharmacy", "notify", "deliveries", "alertReads", "passwords", "resets"].forEach((k) => storage.remove(V + k));
+    set({ items: seedItems(), users: seedUsers(), roles: seedRoles(), monthly: seedMonthly(), thresholds: DEFAULT_THRESHOLDS, pharmacy: PHARMACY });
   },
 };

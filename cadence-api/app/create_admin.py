@@ -8,9 +8,8 @@ import getpass
 from sqlalchemy import func, select
 
 from .db import SessionLocal
-from .models import Pharmacy, Role, User
-from .security import hash_password
-from .seed import ROLES
+from .models import User
+from .services.tenancy import create_pharmacy
 
 
 async def main() -> None:
@@ -24,13 +23,7 @@ async def main() -> None:
     async with SessionLocal() as db:
         if await db.scalar(select(User.id).where(func.lower(User.email) == email)):
             raise SystemExit("A user with that email already exists.")
-        ph = Pharmacy(name=name, location=location)
-        db.add(ph)
-        await db.flush()
-        for role, summary, perms, locked in ROLES:
-            db.add(Role(pharmacy_id=ph.id, name=role, summary=summary, perms=list(perms), locked=locked))
-        db.add(User(pharmacy_id=ph.id, email=email, password_hash=hash_password(password), name=admin_name,
-                    role="Admin", position="Pharmacy Manager", department="Management"))
+        await create_pharmacy(db, name=name, location=location, licence_no="", admin_name=admin_name, email=email, password=password)
         await db.commit()
     print(f"Created {name} with admin {email}. Log in on the web app.")
 

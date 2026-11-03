@@ -45,7 +45,8 @@ export default function Insights() {
 
   useEffect(() => { void aiStatus().then(setConnected); }, []);
 
-  const history = () => msgs.flatMap((m) => (m.role === "user" ? [{ role: "user" as const, text: m.text }] : m.role === "ai" && !m.pending && !m.error ? [{ role: "ai" as const, text: m.text }] : []));
+  type Turn = { role: "user" | "ai"; text: string };
+  const history = (): Turn[] => msgs.flatMap((m): Turn[] => (m.role === "user" ? [{ role: "user", text: m.text }] : m.role === "ai" && !m.pending && !m.error ? [{ role: "ai", text: m.text }] : []));
 
   async function send(text: string, ds: Dataset | null = dataset) {
     if (busy || !text.trim()) return;

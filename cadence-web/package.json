@@ -1,7 +1,7 @@
 {
   "name": "cadence-web",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Cadence.io — pharmacy expiry monitoring and AI insights (web app)",
   "scripts": {

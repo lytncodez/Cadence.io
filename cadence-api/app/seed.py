@@ -58,14 +58,7 @@ ROWS = [
     ("Azithromycin 500mg Tabs ×3", "Antibiotics", "6034000221066", "AZI-2506", 140, 40, 12.5, 24, "Tobinco Pharma", 26, 15),
 ]
 
-PERMISSIONS = ["view_inventory", "edit_inventory", "delete_inventory", "import", "dispense",
-               "view_insights", "view_finance", "manage_alerts", "manage_users", "company"]
-ROLES = [
-    ("Admin", "Full access to every feature", PERMISSIONS, True),
-    ("Pharmacist", "Manages stock, dispenses and reads reports",
-     ["view_inventory", "edit_inventory", "import", "dispense", "view_insights", "view_finance", "manage_alerts"], False),
-    ("Dispenser", "Views stock, dispenses and clears alerts", ["view_inventory", "dispense"], False),
-]
+from .services.tenancy import PERMISSIONS, ROLES  # noqa: E402,F401  (one definition for seed, sign-up and create_admin)
 STAFF = [
     # name, email, role, status, position, staff_id, phone, department, reg_no, joined_days_ago, bio
     ("Abena Mensah", "abena@harbourview.example", "Admin", "Active", "Pharmacy Manager", "HVP-001", "+233 24 555 0142", "Management", "", 2050,

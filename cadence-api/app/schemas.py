@@ -56,8 +56,8 @@ class ItemOut(CamelModel):
     batch: str
     expiry: date
     qty: int
-    unit_cost: float
-    unit_price: float
+    unit_cost: float | None  # null for roles without view_finance (e.g. dispensers)
+    unit_price: float  # selling price: counter staff need it to charge customers
     supplier: str
     sold_this_month: int
     reorder_level: int
@@ -140,6 +140,34 @@ class PasswordChange(BaseModel):
     next: str = Field(min_length=10, max_length=200)
 
 
+class SignupIn(CamelModel):
+    pharmacy_name: str = Field(min_length=2, max_length=160)
+    location: str = Field(min_length=2, max_length=160)
+    licence_no: str = Field(default="", max_length=60)
+    name: str = Field(min_length=2, max_length=120)
+    position: str = Field(default="Pharmacy Manager", max_length=120)
+    email: EmailStr
+    phone: str = Field(default="", max_length=40)
+    password: str = Field(min_length=10, max_length=200)
+    website: str = Field(default="", max_length=200)  # honeypot
+
+    @field_validator("phone")
+    @classmethod
+    def phone_format(cls, v: str):
+        if v and not re.fullmatch(r"\+?\d[\d\s]{7,}", v):
+            raise ValueError("Enter the phone number in +233 format")
+        return v.strip()
+
+
+class InviteIn(CamelModel):
+    name: str = Field(min_length=2, max_length=120)
+    email: EmailStr
+    role: str = Field(min_length=2, max_length=40)
+    position: str = Field(default="", max_length=120)
+    department: str = Field(default="", max_length=80)
+    phone: str = Field(default="", max_length=40)
+
+
 class ForgotPasswordIn(BaseModel):
     email: EmailStr
 
@@ -153,6 +181,8 @@ class ResetCheckOut(CamelModel):
     valid: bool
     name: str = ""
     email: str = ""
+    invite: bool = False  # True for a new team member setting their first password
+    pharmacy: str = ""
 
 
 class ResetLinkOut(CamelModel):
@@ -162,6 +192,11 @@ class ResetLinkOut(CamelModel):
     # Only returned when the email wasn't actually delivered, so the admin can pass the link on in person.
     link: str | None = None
     expires_minutes: int
+
+
+class InviteOut(CamelModel):
+    user: UserOut
+    delivery: ResetLinkOut
 
 
 # ---------- Demo requests (public website) ----------

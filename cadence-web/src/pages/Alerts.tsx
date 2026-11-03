@@ -26,10 +26,11 @@ export default function Alerts() {
   const load = useCallback(async () => {
     try {
       setError("");
-      const [a, n, d] = await Promise.all([alertsApi.list(), alertsApi.getSettings(), alertsApi.deliveries()]);
+      // The delivery log quotes stock values, so only people who manage alerts load it.
+      const [a, n, d] = await Promise.all([alertsApi.list(), alertsApi.getSettings(), manage ? alertsApi.deliveries() : Promise.resolve([])]);
       setList(a); setNs((cur) => cur ?? n); setLog(d);
     } catch (e) { setError((e as Error).message); }
-  }, []);
+  }, [manage]);
   useEffect(() => { void load(); }, [load, items, thresholds]);
 
   const counts = useMemo(() => {
@@ -106,15 +107,15 @@ export default function Alerts() {
                 <Row icon={<LuMessageSquare />} title="SMS alerts" hint="Critical and expired batches, once a day">
                   <Toggle checked={ns.smsEnabled} onChange={(v) => setNs({ ...ns, smsEnabled: v })} label="SMS alerts" disabled={!manage} />
                 </Row>
-                <Field label="Phone numbers" htmlFor="al-numbers" hint="Separate with commas, e.g. +233 24 555 0142">
-                  <Input id="al-numbers" value={ns.smsNumbers} onChange={(e) => setNs({ ...ns, smsNumbers: e.target.value })} disabled={!manage || !ns.smsEnabled} />
-                </Field>
+                {manage && <Field label="Phone numbers" htmlFor="al-numbers" hint="Separate with commas, e.g. +233 24 555 0142">
+                  <Input id="al-numbers" value={ns.smsNumbers} onChange={(e) => setNs({ ...ns, smsNumbers: e.target.value })} disabled={!ns.smsEnabled} />
+                </Field>}
                 <Row icon={<LuMail />} title="Email digest" hint="Every open alert in one email">
                   <Toggle checked={ns.emailEnabled} onChange={(v) => setNs({ ...ns, emailEnabled: v })} label="Email digest" disabled={!manage} />
                 </Row>
-                <Field label="Email address" htmlFor="al-email">
-                  <Input id="al-email" type="email" value={ns.email} onChange={(e) => setNs({ ...ns, email: e.target.value })} disabled={!manage || !ns.emailEnabled} />
-                </Field>
+                {manage && <Field label="Email address" htmlFor="al-email">
+                  <Input id="al-email" type="email" value={ns.email} onChange={(e) => setNs({ ...ns, email: e.target.value })} disabled={!ns.emailEnabled} />
+                </Field>}
                 <Field label="Send at (Ghana time)" htmlFor="al-time">
                   <Input id="al-time" type="time" value={ns.digestTime} onChange={(e) => setNs({ ...ns, digestTime: e.target.value })} disabled={!manage} className="max-w-[160px]" />
                 </Field>
@@ -145,7 +146,7 @@ export default function Alerts() {
             )}
           </Card>
 
-          <Card className="overflow-hidden">
+          {manage && <Card className="overflow-hidden">
             <CardHeader title="Recent deliveries" subtitle="Last 20 messages" action={manage && log.length ? <Button size="sm" variant="ghost" onClick={async () => { await alertsApi.clearDeliveries(); setLog([]); }}><LuTrash2 />Clear</Button> : undefined} />
             {log.length === 0 ? <p className="px-5 pb-5 text-sm text-muted">Nothing sent yet. Use Test SMS, Test email or Send digest now.</p> : (
               <ul className="grid min-w-0 gap-2 px-3 pb-3">
@@ -168,7 +169,7 @@ export default function Alerts() {
                 ))}
               </ul>
             )}
-          </Card>
+          </Card>}
         </div>
       </div>
     </AppShell>

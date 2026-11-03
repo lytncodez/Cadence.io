@@ -3,8 +3,9 @@ import asyncio
 import os
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_cadence.db"
-os.environ["JWT_SECRET"] = "test-secret"
+os.environ["JWT_SECRET"] = "test-secret-that-is-at-least-32-bytes-long"
 os.environ["SEED_PASSWORD"] = "cadence2026"
+os.environ["DATA_ENCRYPTION_KEY"] = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="  # test-only key
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -77,6 +78,20 @@ def test_dispenser_cannot_add_stock(client):
     r = client.post("/api/v1/items", json={"name": "X drug", "barcode": "99999999", "batch": "B", "expiry": "2030-01-01",
                                           "qty": 1, "unitCost": 1, "unitPrice": 2}, headers=h)
     assert r.status_code == 403
+
+
+def test_dispenser_gets_no_financial_data(client):
+    h = login(client, "efua@harbourview.example")
+    items = client.get("/api/v1/items", headers=h).json()
+    assert items and all(i["unitCost"] is None for i in items)
+    assert all(i["unitPrice"] > 0 for i in items)  # selling price stays: they charge customers at the counter
+    assert client.get("/api/v1/analytics/monthly", headers=h).status_code == 403
+    assert client.get("/api/v1/alerts/deliveries", headers=h).status_code == 403
+    assert client.post("/api/v1/ai/chat", json={"message": "report"}, headers=h).status_code == 403
+    assert all("₵" not in a["text"] for a in client.get("/api/v1/alerts", headers=h).json())
+    # Pharmacists still see costs
+    k = login(client, "kojo@harbourview.example")
+    assert all(i["unitCost"] is not None for i in client.get("/api/v1/items", headers=k).json())
 
 
 def test_price_below_cost_is_readable_error(client):
@@ -192,7 +207,7 @@ def test_change_password(client):
 def test_forgot_password_never_reveals_accounts(client):
     assert client.post("/api/v1/auth/forgot-password", json={"email": "nobody@nowhere.example"}).status_code == 204
     assert client.post("/api/v1/auth/forgot-password", json={"email": "efua@harbourview.example"}).status_code == 204
-    assert client.get("/api/v1/auth/reset-password/not-a-real-token-at-all-xyz").json() == {"valid": False, "name": "", "email": ""}
+    assert client.get("/api/v1/auth/reset-password/not-a-real-token-at-all-xyz").json()["valid"] is False
 
 
 def test_admin_reset_link_flow(client):
@@ -241,3 +256,137 @@ def test_demo_requests(client):
     codes = [client.post("/api/v1/demo-requests", json=ok).status_code for _ in range(5)]
     # The honeypot and the invalid request don't count toward the limit of 5 an hour
     assert codes == [201, 201, 201, 201, 429]
+
+
+def test_personal_data_is_encrypted_at_rest(client):
+    import sqlite3
+    h = login(client, "abena@harbourview.example")
+    me = client.get("/api/v1/auth/me", headers=h).json()
+    assert me["phone"].startswith("+233")  # the API returns plain text
+    con = sqlite3.connect("test_cadence.db")
+    try:
+        phone, reg = con.execute("SELECT phone, reg_no FROM users WHERE lower(email) = 'abena@harbourview.example'").fetchone()
+        numbers = con.execute("SELECT sms_numbers FROM notification_settings").fetchone()[0]
+        email = con.execute("SELECT email FROM users WHERE lower(email) = 'abena@harbourview.example'").fetchone()[0]
+    finally:
+        con.close()
+    assert phone.startswith("enc:v1:") and "+233" not in phone
+    assert reg == "" or reg.startswith("enc:v1:")
+    assert numbers.startswith("enc:v1:")
+    assert email == "abena@harbourview.example"  # sign-in emails stay readable for lookup
+
+
+def test_security_headers(client):
+    r = client.get("/health")
+    assert r.headers["Strict-Transport-Security"].startswith("max-age=")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+
+
+# ---------- Several pharmacies (tenants) ----------
+NEW_PHARMACY = {"pharmacyName": "Osu Community Pharmacy", "location": "Osu, Accra", "licenceNo": "PC/RP/2201/26",
+                "name": "Ama Boateng", "position": "Superintendent Pharmacist", "email": "ama@osu.example",
+                "phone": "+233 24 123 4567", "password": "osu-pharmacy-2026"}
+
+
+def _bearer(r):
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def test_signup_creates_a_separate_pharmacy(client):
+    r = client.post("/api/v1/auth/signup", json=NEW_PHARMACY)
+    assert r.status_code == 201, r.text
+    assert r.json()["user"]["role"] == "Admin"
+    b = _bearer(r)
+    assert client.get("/api/v1/pharmacy", headers=b).json()["name"] == "Osu Community Pharmacy"
+    assert client.get("/api/v1/items", headers=b).json() == []
+    assert [u["email"] for u in client.get("/api/v1/users", headers=b).json()] == ["ama@osu.example"]
+    assert {r["name"] for r in client.get("/api/v1/roles", headers=b).json()} == {"Admin", "Pharmacist", "Dispenser"}
+    assert all(m["revenue"] == 0 for m in client.get("/api/v1/analytics/monthly", headers=b).json())
+    assert client.get("/api/v1/alerts", headers=b).json() == []
+    assert client.get("/api/v1/alerts/settings", headers=b).json()["email"] == "ama@osu.example"
+    # The same email can't sign up twice
+    assert client.post("/api/v1/auth/signup", json=NEW_PHARMACY).status_code == 409
+
+
+def test_pharmacies_cannot_see_or_touch_each_other(client):
+    a = login(client, "abena@harbourview.example")
+    b = _bearer(client.post("/api/v1/auth/login", json={"email": "ama@osu.example", "password": "osu-pharmacy-2026"}))
+    a_item = client.get("/api/v1/items", headers=a).json()[0]
+    a_user = next(u for u in client.get("/api/v1/users", headers=a).json() if u["role"] == "Dispenser")
+    # Reading, editing or deleting another pharmacy's batch looks like it doesn't exist
+    assert client.get(f"/api/v1/items/barcode/{a_item['barcode']}", headers=b).json() == []
+    assert client.patch(f"/api/v1/items/{a_item['id']}", json={"qty": 1}, headers=b).status_code == 404
+    assert client.delete(f"/api/v1/items/{a_item['id']}", headers=b).status_code == 404
+    assert client.patch(f"/api/v1/users/{a_user['id']}", json={"name": "Hacked"}, headers=b).status_code == 404
+    assert client.post(f"/api/v1/users/{a_user['id']}/send-reset", headers=b).status_code == 404
+    # The AI only ever sees your own pharmacy
+    text = client.post("/api/v1/ai/chat", json={"message": "Generate a report"}, headers=b).json()["text"]
+    assert "Coartem" not in text and "Harbour" not in text
+    # Same barcode can exist in both pharmacies, independently
+    mine = {"name": "Coartem 80/480mg ×6", "category": "Antimalarials", "barcode": a_item["barcode"], "batch": "OSU-001",
+            "expiry": "2027-06-30", "qty": 12, "unitCost": 30, "unitPrice": 45, "supplier": "Osu Supplies"}
+    assert client.post("/api/v1/items", json=mine, headers=b).status_code == 201
+    assert len(client.get("/api/v1/items", headers=b).json()) == 1
+    assert all(i["batch"] != "OSU-001" for i in client.get("/api/v1/items", headers=a).json())
+    assert client.get(f"/api/v1/items/{a_item['id']}", headers=a).status_code in (404, 405)  # no single-item route; fine
+
+
+def test_invite_a_team_member(client):
+    b = _bearer(client.post("/api/v1/auth/login", json={"email": "ama@osu.example", "password": "osu-pharmacy-2026"}))
+    r = client.post("/api/v1/users", json={"name": "Kofi Mensah", "email": "kofi@osu.example", "role": "Pharmacist",
+                                            "position": "Pharmacist"}, headers=b)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["user"]["status"] == "Invited" and body["delivery"]["expiresMinutes"] == 72 * 60
+    token = body["delivery"]["link"].split("token=")[1]
+    # Invited people can't log in until they set a password
+    assert client.post("/api/v1/auth/login", json={"email": "kofi@osu.example", "password": "whatever-123"}).status_code == 401
+    check = client.get(f"/api/v1/auth/reset-password/{token}").json()
+    assert check["invite"] is True and check["pharmacy"] == "Osu Community Pharmacy"
+    assert client.post("/api/v1/auth/reset-password", json={"token": token, "password": "kofi-password-1"}).status_code == 204
+    k = _bearer(client.post("/api/v1/auth/login", json={"email": "kofi@osu.example", "password": "kofi-password-1"}))
+    me = client.get("/api/v1/auth/me", headers=k).json()
+    assert me["status"] == "Active" and me["role"] == "Pharmacist"
+    assert [i["batch"] for i in client.get("/api/v1/items", headers=k).json()] == ["OSU-001"]
+    # Someone else's email, an unknown role, or a non-admin inviting: all refused
+    assert client.post("/api/v1/users", json={"name": "X Y", "email": "abena@harbourview.example", "role": "Dispenser"}, headers=b).status_code == 409
+    assert client.post("/api/v1/users", json={"name": "X Y", "email": "x@osu.example", "role": "Owner"}, headers=b).status_code == 400
+    assert client.post("/api/v1/users", json={"name": "X Y", "email": "y@osu.example", "role": "Dispenser"}, headers=k).status_code == 403
+
+
+def test_admin_cannot_lock_the_pharmacy_out(client):
+    b = _bearer(client.post("/api/v1/auth/login", json={"email": "ama@osu.example", "password": "osu-pharmacy-2026"}))
+    me = client.get("/api/v1/auth/me", headers=b).json()
+    assert client.patch(f"/api/v1/users/{me['id']}", json={"status": "Suspended"}, headers=b).status_code == 400
+
+
+def test_login_lockout_after_repeated_wrong_passwords(client):
+    codes = [client.post("/api/v1/auth/login", json={"email": "nobody@lockout.example", "password": "wrong-password"}).status_code
+             for _ in range(11)]
+    assert codes[:10] == [401] * 10 and codes[10] == 429
+
+
+def test_integrations_status_and_ai_test(client):
+    a = login(client, "abena@harbourview.example")
+    r = client.get("/api/v1/integrations", headers=a).json()
+    assert r["sms"]["status"] == "demo" and r["email"]["status"] == "demo" and r["ai"]["status"] == "demo"
+    assert r["encryption"]["status"] == "live"
+    assert client.post("/api/v1/integrations/test-ai", headers=a).json()["status"] == "mock"
+    e = client.post("/api/v1/auth/login", json={"email": "ama@osu.example", "password": "osu-pharmacy-2026"})
+    assert client.get("/api/v1/integrations", headers=_bearer(e)).status_code == 200
+
+
+def test_email_and_sms_report_missing_settings(monkeypatch):
+    from app.config import get_settings
+    from app.services import notify
+    s = get_settings()
+    monkeypatch.setattr(s, "email_provider", "brevo")
+    monkeypatch.setattr(s, "email_from", "")
+    assert "EMAIL_FROM" in notify.email_problem()
+    monkeypatch.setattr(s, "email_from", "alerts@example.com")
+    assert "BREVO_API_KEY" in notify.email_problem()
+    monkeypatch.setattr(s, "sms_provider", "arkesel")
+    monkeypatch.setattr(s, "arkesel_api_key", "")
+    assert "ARKESEL_API_KEY" in notify.sms_problem()
+    status, detail = asyncio.run(notify.send_sms(["233245550142"], "hi"))
+    assert status == "failed" and "ARKESEL_API_KEY" in detail

@@ -1,3 +1,4 @@
+import hmac
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -6,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..db import get_db
-from ..deps import current_user, require
+from ..deps import can_see_finance, current_user, require
 from ..models import AlertRead, NotificationLog, NotificationSettings, Pharmacy, User
 from ..schemas import AlertOut, DeliveryOut, NotifySettingsIO, SendResult
 from ..services import notify
@@ -30,7 +31,8 @@ async def list_alerts(user: User = Depends(current_user), db: AsyncSession = Dep
     s = await summarize(db, user)
     read = set((await db.scalars(select(AlertRead.key).where(AlertRead.user_id == user.id))).all())
     await db.commit()
-    return [AlertOut(**a, read=a["key"] in read) for a in notify.compute_alerts(s, ns)]
+    fin = await can_see_finance(db, user)
+    return [AlertOut(**a, read=a["key"] in read) for a in notify.compute_alerts(s, ns, fin)]
 
 
 @router.post("/read", status_code=204)
@@ -117,7 +119,7 @@ async def cron(x_cron_secret: str = Header(default=""), db: AsyncSession = Depen
     """Call every 15 minutes from cron-job.org with header X-Cron-Secret. Sends each pharmacy's digest once a day
     after its digest time (Ghana time = UTC)."""
     secret = get_settings().cron_secret
-    if not secret or x_cron_secret != secret:
+    if not secret or not hmac.compare_digest(x_cron_secret.encode(), secret.encode()):
         raise HTTPException(403, "Bad or missing X-Cron-Secret.")
     now = datetime.now(timezone.utc).strftime("%H:%M")
     sent = 0
@@ -132,7 +134,8 @@ async def cron(x_cron_secret: str = Header(default=""), db: AsyncSession = Depen
 
 
 @router.get("/deliveries", response_model=list[DeliveryOut])
-async def deliveries(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def deliveries(user: User = Depends(require("manage_alerts")), db: AsyncSession = Depends(get_db)):
+    """Digest messages quote stock values, so the log is limited to people who manage alerts."""
     rows = (await db.scalars(select(NotificationLog).where(NotificationLog.pharmacy_id == user.pharmacy_id)
                              .order_by(NotificationLog.created_at.desc()).limit(20))).all()
     return [DeliveryOut(id=str(r.id), channel=r.channel, recipient=r.recipient, subject=r.subject, message=r.message, status=r.status,

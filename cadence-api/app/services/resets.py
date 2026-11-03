@@ -31,12 +31,19 @@ async def recently_requested(db: AsyncSession, user: User, seconds: int = 60) ->
     return bool(last and datetime.now(timezone.utc) - _aware(last) < timedelta(seconds=seconds))
 
 
+INVITE_MINUTES = 72 * 60  # invites last three days; reset links last RESET_LINK_MINUTES
+
+
+def minutes_for(user: User) -> int:
+    return INVITE_MINUTES if user.status == "Invited" else get_settings().reset_link_minutes
+
+
 async def issue(db: AsyncSession, user: User, requested_by: str = "self") -> str:
     now = datetime.now(timezone.utc)
     await db.execute(update(PasswordReset).where(PasswordReset.user_id == user.id, PasswordReset.used_at.is_(None)).values(used_at=now))
     token = secrets.token_urlsafe(32)
     db.add(PasswordReset(user_id=user.id, token_hash=_hash(token), requested_by=requested_by,
-                         expires_at=now + timedelta(minutes=get_settings().reset_link_minutes)))
+                         expires_at=now + timedelta(minutes=minutes_for(user))))
     await db.flush()
     return token
 
@@ -54,13 +61,22 @@ async def find(db: AsyncSession, token: str) -> tuple[PasswordReset, User] | Non
 async def email_link(db: AsyncSession, user: User, token: str, by_admin: str | None = None) -> tuple[str, str]:
     """Send the reset email. The delivery log records that a link went out, never the link itself."""
     ph = await db.get(Pharmacy, user.pharmacy_id)
-    minutes = get_settings().reset_link_minutes
     first = user.name.split()[0] if user.name else "there"
-    intro = (f"{by_admin} asked Cadence to send you a link to set a new password." if by_admin
-             else "Someone (hopefully you) asked to reset your Cadence password.")
-    body = (f"Hi {first},\n\n{intro}\n\nSet a new password here (the link works once and expires in {minutes} minutes):\n"
-            f"{link_for(token)}\n\nIf you didn't ask for this, ignore this email. Your password stays the same.\n\n"
-            f"Cadence.io · {ph.name if ph else ''}")
-    status, error = await send_email(user.email, "Reset your Cadence password", body)
-    await log(db, user.pharmacy_id, "email", user.email, "Password reset link", status, error, "reset", subject="Reset your Cadence password")
+    pharmacy = ph.name if ph else "your pharmacy"
+    if user.status == "Invited":
+        subject = f"You're invited to {pharmacy} on Cadence"
+        body = (f"Hi {first},\n\n{by_admin or 'Your admin'} has added you to {pharmacy} on Cadence.io, the app your pharmacy uses "
+                f"to track medicine expiry and stock.\n\nSet your password to get started (the link works once and expires in 3 days):\n"
+                f"{link_for(token)}\n\nAfter that, log in with this email address: {user.email}\n\nCadence.io · {pharmacy}")
+        kind_note = "Team invite"
+    else:
+        minutes = minutes_for(user)
+        intro = (f"{by_admin} asked Cadence to send you a link to set a new password." if by_admin
+                 else "Someone (hopefully you) asked to reset your Cadence password.")
+        subject = "Reset your Cadence password"
+        body = (f"Hi {first},\n\n{intro}\n\nSet a new password here (the link works once and expires in {minutes} minutes):\n"
+                f"{link_for(token)}\n\nIf you didn't ask for this, ignore this email. Your password stays the same.\n\nCadence.io · {pharmacy}")
+        kind_note = "Password reset link"
+    status, error = await send_email(user.email, subject, body)
+    await log(db, user.pharmacy_id, "email", user.email, kind_note, status, error, "reset", subject=subject)
     return status, error

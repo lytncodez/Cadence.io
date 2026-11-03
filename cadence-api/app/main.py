@@ -6,10 +6,13 @@ from sqlalchemy import text
 
 from .config import get_settings
 from .db import engine
-from .routers import ai, alerts, analytics, auth, demo, items, team
+from .routers import ai, alerts, analytics, auth, demo, items, system, team
 
 settings = get_settings()
-app = FastAPI(title="Cadence.io API", version="0.4.0", docs_url="/docs", redoc_url=None)
+# Refuse to run against a real database with the development signing key: anyone could forge logins.
+if not settings.database_url.startswith("sqlite") and (settings.jwt_secret == "dev-only-change-me" or len(settings.jwt_secret) < 32):
+    raise RuntimeError("Set JWT_SECRET to a random value of at least 32 characters (Render generates one for you).")
+app = FastAPI(title="Cadence.io API", version="0.5.0", docs_url="/docs", redoc_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,6 +22,19 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Cron-Secret"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """HTTPS-only (HSTS) plus the usual browser hardening. Render serves everything over TLS."""
+    response = await call_next(request)
+    h = response.headers
+    h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Referrer-Policy", "no-referrer")
+    h.setdefault("Cache-Control", "no-store")  # API answers hold pharmacy data; never cache them
+    return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -31,7 +47,7 @@ async def readable_validation_errors(_: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": f"{field}: {msg}", "errors": errors})
 
 
-for r in (auth.router, items.router, team.router, analytics.router, alerts.router, ai.router, demo.router):
+for r in (auth.router, items.router, team.router, analytics.router, alerts.router, ai.router, demo.router, system.router):
     app.include_router(r, prefix=settings.api_prefix)
 
 

@@ -60,7 +60,7 @@ export default function Profile({ userId }: { userId?: string }) {
           <div className="flex gap-2">
             {(self || can("manage_users")) && <Button onClick={() => setEdit(true)}><LuPencil />Edit profile</Button>}
             {self && <Button onClick={() => setPw(true)}><LuLock />Password</Button>}
-            {!self && can("manage_users") && u.status !== "Suspended" && <Button onClick={() => setReset(true)}><LuKeyRound />Reset password</Button>}
+            {!self && can("manage_users") && u.status !== "Suspended" && <Button onClick={() => setReset(true)}><LuKeyRound />{u.status === "Invited" ? "Resend invite" : "Reset password"}</Button>}
           </div>
           {u.bio && <p className="w-full max-w-3xl text-[15px] leading-relaxed text-ink-2">{u.bio}</p>}
         </div>
@@ -266,8 +266,8 @@ function SendReset({ open, onClose, user }: { open: boolean; onClose: () => void
   }
   const copy = () => res?.link && navigator.clipboard?.writeText(res.link).then(() => toast({ message: "Link copied" }), () => toast({ message: "Couldn't copy. Select the link instead.", tone: "error" }));
   return (
-    <Modal open={open} onClose={close} title={res ? "Share this link with " + first : `Reset ${first}'s password`}
-      description={res ? undefined : `We'll email ${user.email} a link to choose a new password. You won't see their password.`}
+    <Modal open={open} onClose={close} title={res ? "Share this link with " + first : user.status === "Invited" ? `Resend ${first}'s invite` : `Reset ${first}'s password`}
+      description={res ? undefined : `We'll email ${user.email} a link to ${user.status === "Invited" ? "set their password and activate their account" : "choose a new password"}. You won't see their password.`}
       footer={res ? <Button variant="primary" onClick={close}>Done</Button> : <><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" loading={busy} onClick={send}><LuMailCheck />Send reset link</Button></>}>
       {res ? (
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">

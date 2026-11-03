@@ -50,6 +50,7 @@ export default function Website() {
           </nav>
           <div className="ml-auto hidden items-center gap-2 md:flex">
             {authCta}
+            {!user && <Link to="/signup" className={cn(buttonClass({ variant: "secondary", size: "md" }), onHero && "border-white/20 bg-white/10 text-white hover:border-white/35 hover:bg-white/15")}>Create account</Link>}
             <a href="#demo" onClick={jump("#demo")} className={buttonClass({ variant: "primary", size: "md" })}>Book a demo</a>
           </div>
           <button className={cn("ml-auto grid size-10 place-items-center rounded-xl md:hidden", scrolled || menu ? "text-ink hover:bg-sunken" : "text-white hover:bg-white/10")} onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-label={menu ? "Close menu" : "Open menu"}>
@@ -61,6 +62,7 @@ export default function Website() {
             {NAV.map(([h, l]) => <a key={h} href={h} onClick={jump(h)} className="block border-b border-line py-3 font-medium">{l}</a>)}
             <div className="mt-4 grid gap-2">
               <Link to={user ? "/app" : "/login"} className={buttonClass({ variant: "secondary", size: "lg" })}>{user ? "Open dashboard" : "Log in"}</Link>
+              {!user && <Link to="/signup" className={buttonClass({ variant: "secondary", size: "lg" })}>Create a pharmacy account</Link>}
               <a href="#demo" onClick={jump("#demo")} className={buttonClass({ variant: "primary", size: "lg" })}>Book a demo</a>
             </div>
           </div>
@@ -86,7 +88,7 @@ export default function Website() {
             </p>
             <div className="mt-9 flex animate-fade-up flex-wrap gap-3 [animation-delay:260ms]">
               <a href="#demo" onClick={jump("#demo")} className={cn(buttonClass({ size: "lg" }), "border-transparent bg-white text-[#0a1640] shadow-xl hover:bg-white/90")}>Book a demo<LuArrowRight /></a>
-              <Link to={user ? "/app" : "/login"} className={cn(buttonClass({ size: "lg" }), "border-white/20 bg-white/10 text-white backdrop-blur hover:border-white/35 hover:bg-white/15")}>{user ? "Open your dashboard" : "Log in to your pharmacy"}</Link>
+              <Link to={user ? "/app" : "/signup"} className={cn(buttonClass({ size: "lg" }), "border-white/20 bg-white/10 text-white backdrop-blur hover:border-white/35 hover:bg-white/15")}>{user ? "Open your dashboard" : "Create your pharmacy account"}</Link>
             </div>
             <ul className="mt-9 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[#a9b8de]">
               {["Works on counter PCs and phones", "Morning SMS to +233 numbers", "Prices in cedis"].map((t) => <li key={t} className="flex items-center gap-2"><LuCheck className="size-4 text-[#5fe0a0]" />{t}</li>)}
@@ -127,7 +129,7 @@ export default function Website() {
             <p className="mx-auto mt-4 max-w-lg text-[#c3cfee]">Set up takes an afternoon. Bring your current stock list and we'll load it with you.</p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <a href="#demo" onClick={jump("#demo")} className={cn(buttonClass({ size: "lg" }), "border-transparent bg-white text-[#0a1640] hover:bg-white/90")}>Book a demo<LuArrowRight /></a>
-              <Link to={user ? "/app" : "/login"} className={cn(buttonClass({ size: "lg" }), "border-white/20 bg-white/10 text-white hover:bg-white/15")}>{user ? "Open dashboard" : "Log in"}</Link>
+              <Link to={user ? "/app" : "/signup"} className={cn(buttonClass({ size: "lg" }), "border-white/20 bg-white/10 text-white hover:bg-white/15")}>{user ? "Open dashboard" : "Create an account"}</Link>
             </div>
           </div>
         </div>
@@ -150,7 +152,7 @@ export default function Website() {
           ))}
           <div>
             <p className="mb-3 text-sm font-semibold">Your pharmacy</p>
-            <ul className="grid gap-2 text-sm text-muted"><li><Link to={user ? "/app" : "/login"} className="hover:text-ink">{user ? "Open dashboard" : "Log in"}</Link></li></ul>
+            <ul className="grid gap-2 text-sm text-muted"><li><Link to={user ? "/app" : "/login"} className="hover:text-ink">{user ? "Open dashboard" : "Log in"}</Link></li>{!user && <li><Link to="/signup" className="hover:text-ink">Create an account</Link></li>}</ul>
           </div>
         </div>
         <div className="mx-auto flex max-w-[1200px] flex-wrap justify-between gap-2 border-t border-line px-5 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-xs text-muted">

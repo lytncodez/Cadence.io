@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Menu, MenuButton, MenuItem, MenuItems, Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
 import {
   LuHouse, LuPackage, LuSparkles, LuBell, LuSettings, LuSearch, LuPanelLeftClose, LuPanelLeftOpen, LuSun, LuMoon, LuMonitor,
-  LuLogOut, LuUser, LuChevronsUpDown, LuStore, LuShieldCheck, LuArrowRight,
+  LuLogOut, LuUser, LuChevronsUpDown, LuStore, LuShieldCheck, LuArrowRight, LuScanLine,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { Link, navigate, usePath } from "@/lib/router";
@@ -26,7 +26,7 @@ const NAV: NavItem[] = [
 ];
 
 export function AppShell({ title, children }: { title: string; children: ReactNode }) {
-  const path = usePath();
+  const path = usePath().split("?")[0];
   const can = useCan();
   const [collapsed, setCollapsed] = useState(() => storage.get("sidebar.collapsed", false));
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -41,10 +41,13 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
   useEffect(() => storage.set("sidebar.collapsed", collapsed), [collapsed]);
   useEffect(() => { document.title = `${title} · Cadence.io`; }, [title]);
   useHotkey("k", () => setCmdOpen(true), { meta: true });
-  useHotkey("/app", () => setCmdOpen(true));
+  useHotkey("/", () => setCmdOpen(true));
   useHotkey("n", () => can("edit_inventory") && setAddOpen(true));
 
-  const nav = NAV.filter((n) => !n.perm || can(n.perm));
+  // Counter staff (no access to finances) get the Counter home instead of the owner's Overview.
+  const counter = !can("view_finance");
+  const me = useCurrentUser();
+  const nav = NAV.filter((n) => !n.perm || can(n.perm)).map((n) => (n.to === "/app" && counter ? { ...n, label: "Counter", icon: LuScanLine } : n));
 
   return (
     <div className="min-h-full bg-bg">
@@ -62,7 +65,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
         </div>
 
         <nav className={cn("mt-5 flex flex-col gap-1 px-3", collapsed && "px-2")} aria-label="Main">
-          {!collapsed && <p className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">Workspace</p>}
+          {!collapsed && <p className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">{me?.role ? `${me.role} workspace` : "Workspace"}</p>}
           {nav.map((n) => {
             const on = n.match(path);
             return (

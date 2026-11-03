@@ -54,21 +54,21 @@ export default function ResetPassword() {
           {!check ? <HexLoader label="Checking your link" /> : done ? (
             <div>
               <span className="hex-clip grid size-14 place-items-center bg-safe-soft text-safe-ink"><LuCircleCheck className="size-6" /></span>
-              <h1 className="mt-5 font-display text-[34px] font-bold">Password updated</h1>
-              <p className="mt-2 text-[15px] text-muted">You've been signed out everywhere else. Log in with your new password.</p>
+              <h1 className="mt-5 font-display text-[34px] font-bold">{check.invite ? "You're all set" : "Password updated"}</h1>
+              <p className="mt-2 text-[15px] text-muted">{check.invite ? `Your account at ${check.pharmacy || "your pharmacy"} is active. Log in with ${check.email} and your new password.` : "You've been signed out everywhere else. Log in with your new password."}</p>
               <Button variant="primary" size="lg" className="mt-6 w-full" onClick={() => navigate("/login", { replace: true })}>Log in<LuArrowRight /></Button>
             </div>
           ) : !check.valid ? (
             <div>
               <span className="hex-clip grid size-14 place-items-center bg-critical-soft text-critical-ink"><LuLink2Off className="size-6" /></span>
               <h1 className="mt-5 font-display text-[34px] font-bold">This link doesn't work</h1>
-              <p className="mt-2 text-[15px] text-muted">{err || "Reset links work once and expire after 60 minutes. Asking for a new link also cancels older ones."}</p>
+              <p className="mt-2 text-[15px] text-muted">{err || "Reset links work once and expire after 60 minutes (invites after 3 days). Asking for a new link also cancels older ones. For an invite, ask your admin to resend it."}</p>
               <Button variant="primary" size="lg" className="mt-6 w-full" onClick={() => navigate("/login?forgot=1")}>Send me a new link<LuArrowRight /></Button>
             </div>
           ) : (
             <form onSubmit={submit} noValidate>
-              <h1 className="font-display text-[34px] font-bold">Set a new password</h1>
-              <p className="mt-1.5 text-[15px] text-muted">{check.name ? `Hi ${check.name}. ` : ""}Choose a password for <b className="text-ink">{check.email}</b>.</p>
+              <h1 className="font-display text-[34px] font-bold">{check.invite ? `Welcome to ${check.pharmacy || "Cadence"}` : "Set a new password"}</h1>
+              <p className="mt-1.5 text-[15px] text-muted">{check.name ? `Hi ${check.name}. ` : ""}{check.invite ? "Choose a password to activate your account. You'll log in with " : "Choose a password for "}<b className="text-ink">{check.email}</b>.</p>
               {err && <div role="alert" className="mt-6 flex items-start gap-2.5 rounded-xl bg-critical-soft px-3.5 py-3 text-sm text-critical-ink"><LuCircleAlert className="mt-0.5 size-4 shrink-0" />{err}</div>}
               <div className="mt-6 flex flex-col gap-4">
                 <input type="email" autoComplete="username" value={check.email} readOnly hidden />
@@ -85,7 +85,7 @@ export default function ResetPassword() {
                   </div>
                 )}
                 <Field label="Type it again" htmlFor="npw2"><Input id="npw2" type={show ? "text" : "password"} autoComplete="new-password" value={pw2} onChange={(e) => { setPw2(e.target.value); setErr(""); }} className="h-11" /></Field>
-                <Button type="submit" variant="primary" size="lg" loading={busy} className="mt-1 w-full">Save new password</Button>
+                <Button type="submit" variant="primary" size="lg" loading={busy} className="mt-1 w-full">{check.invite ? "Activate my account" : "Save new password"}</Button>
               </div>
             </form>
           )}

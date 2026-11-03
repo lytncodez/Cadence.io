@@ -130,8 +130,28 @@ def template(kind: str, f: dict) -> str:
             "what to reorder, or about a product such as Coartem.")
 
 
-async def _llm(system: str, question: str, f: dict | None, history: list, max_tokens: int) -> str | None:
+async def _call(system: str, msgs: list[dict], max_tokens: int) -> str:
+    """One request to the configured provider. Raises on any error."""
     s = get_settings()
+    async with httpx.AsyncClient(timeout=45) as client:
+        if s.ai_provider == "anthropic":
+            r = await client.post("https://api.anthropic.com/v1/messages",
+                                  headers={"x-api-key": s.anthropic_api_key, "anthropic-version": "2023-06-01"},
+                                  json={"model": s.ai_model, "max_tokens": max_tokens, "system": system, "messages": msgs})
+            r.raise_for_status()
+            return "".join(b.get("text", "") for b in r.json()["content"]).strip()
+        if s.ai_provider == "openai":
+            # max_completion_tokens replaces the deprecated max_tokens and works with every current chat model.
+            r = await client.post("https://api.openai.com/v1/chat/completions",
+                                  headers={"Authorization": f"Bearer {s.openai_api_key}"},
+                                  json={"model": s.ai_model, "max_completion_tokens": max_tokens,
+                                        "messages": [{"role": "system", "content": system}] + msgs})
+            r.raise_for_status()
+            return (r.json()["choices"][0]["message"]["content"] or "").strip()
+    raise RuntimeError("AI isn't configured.")
+
+
+async def _llm(system: str, question: str, f: dict | None, history: list, max_tokens: int) -> str | None:
     content = question if f is None else f"QUESTION: {question}\nFACTS: {json.dumps(f, ensure_ascii=False, default=str)}"
     turns = [{"role": "user" if h.role == "user" else "assistant", "content": h.text} for h in history[-10:] if h.text.strip()]
     # Providers need the conversation to start with a user turn and alternate.
@@ -144,24 +164,44 @@ async def _llm(system: str, question: str, f: dict | None, history: list, max_to
         else:
             msgs.append(dict(t))
         last = t["role"]
+    if not ai_connected():
+        return None
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            if s.ai_provider == "anthropic" and s.anthropic_api_key and s.ai_model:
-                r = await client.post("https://api.anthropic.com/v1/messages",
-                                      headers={"x-api-key": s.anthropic_api_key, "anthropic-version": "2023-06-01"},
-                                      json={"model": s.ai_model, "max_tokens": max_tokens, "system": system, "messages": msgs})
-                r.raise_for_status()
-                return "".join(b.get("text", "") for b in r.json()["content"]).strip() or None
-            if s.ai_provider == "openai" and s.openai_api_key and s.ai_model:
-                r = await client.post("https://api.openai.com/v1/chat/completions",
-                                      headers={"Authorization": f"Bearer {s.openai_api_key}"},
-                                      json={"model": s.ai_model, "max_tokens": max_tokens,
-                                            "messages": [{"role": "system", "content": system}] + msgs})
-                r.raise_for_status()
-                return r.json()["choices"][0]["message"]["content"].strip() or None
+        return await _call(system, msgs, max_tokens) or None
     except Exception as e:  # never let the AI provider break the page; fall back to templates
         log.warning("AI provider failed, using template: %s", e)
     return None
+
+
+def ai_problem() -> str:
+    s = get_settings()
+    if s.ai_provider == "mock":
+        return ""
+    if s.ai_provider not in {"anthropic", "openai"}:
+        return f"Unknown AI_PROVIDER '{s.ai_provider}'. Use anthropic or openai."
+    if not s.ai_model:
+        return "Set AI_MODEL to a model id from your provider's docs."
+    if s.ai_provider == "anthropic" and not s.anthropic_api_key:
+        return "Set ANTHROPIC_API_KEY (console.anthropic.com → API keys)."
+    if s.ai_provider == "openai" and not s.openai_api_key:
+        return "Set OPENAI_API_KEY (platform.openai.com → API keys)."
+    return ""
+
+
+async def ping() -> tuple[str, str]:
+    """Send a tiny request so admins can check the AI key and model. Returns (status, detail)."""
+    s = get_settings()
+    if s.ai_provider == "mock":
+        return "mock", "AI_PROVIDER is mock: stock questions use built-in wording and general questions are switched off."
+    if problem := ai_problem():
+        return "failed", problem
+    try:
+        text = await _call("Reply with exactly: OK", [{"role": "user", "content": "Connection test"}], 10)
+        return "sent", f"{s.ai_provider} · {s.ai_model} answered: {text[:40]}"
+    except httpx.HTTPStatusError as e:
+        return "failed", f"{e.response.status_code}: {e.response.text[:300]}"
+    except Exception as e:
+        return "failed", str(e)[:300]
 
 
 def ai_connected() -> bool:

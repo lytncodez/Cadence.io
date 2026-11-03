@@ -15,12 +15,14 @@ from ..models import NotificationLog, NotificationSettings
 from .analytics import Summary, money
 
 
-def compute_alerts(s: Summary, ns: NotificationSettings) -> list[dict]:
-    """Same rules as the web app: expired + critical batches, optional expiring-soon, low stock."""
+def compute_alerts(s: Summary, ns: NotificationSettings, finance: bool = True) -> list[dict]:
+    """Same rules as the web app: expired + critical batches, optional expiring-soon, low stock.
+    finance=False leaves money out of the wording (for roles without view_finance)."""
     out = []
     for r in s.rows:
         if r.status == "expired" or r.status == "critical" or (r.status == "soon" and ns.on_soon):
-            text = (f"Batch {r.batch} expired {r.expiry:%d %b %Y}. Quarantine {r.qty} units ({money(r.value)} at cost) and record the write-off."
+            text = ((f"Batch {r.batch} expired {r.expiry:%d %b %Y}. Quarantine {r.qty} units ({money(r.value)} at cost) and record the write-off."
+                     if finance else f"Batch {r.batch} expired {r.expiry:%d %b %Y}. Quarantine {r.qty} units and tell the pharmacist.")
                     if r.status == "expired" else f"Batch {r.batch} expires in {r.days} days. {r.qty} units left; dispense these first."
                     if r.status == "critical" else f"Batch {r.batch} expires in {r.days} days. {r.qty} units on hand.")
             out.append({"key": f"exp-{r.id}-{r.status}", "type": "expiry", "status": r.status, "title": r.name, "text": text,
@@ -77,11 +79,19 @@ async def send_sms(to: list[str], message: str) -> tuple[str, str]:
     s = get_settings()
     if s.sms_provider == "mock":
         return "mock", ""
+    if problem := sms_problem():
+        return "failed", problem
+    if not to:
+        return "failed", "No valid phone numbers."
     try:
         async with httpx.AsyncClient(timeout=15) as c:
             if s.sms_provider == "arkesel":
                 r = await c.post("https://sms.arkesel.com/api/v2/sms/send", headers={"api-key": s.arkesel_api_key},
                                  json={"sender": s.sms_sender_id[:11], "message": message, "recipients": to})
+                r.raise_for_status()
+                body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                if str(body.get("status", "success")).lower() not in {"success", "ok"}:
+                    return "failed", str(body.get("message") or body)[:300]
             elif s.sms_provider == "hubtel":
                 # Hubtel sends one recipient per request.
                 for n in to:
@@ -99,11 +109,23 @@ async def send_sms(to: list[str], message: str) -> tuple[str, str]:
         return "failed", str(e)[:300]
 
 
+def _sender() -> str:
+    s = get_settings()
+    return s.email_from or s.smtp_from or s.smtp_user
+
+
 def _smtp_send(to: str, subject: str, body: str) -> None:
     s = get_settings()
     msg = EmailMessage()
-    msg["From"], msg["To"], msg["Subject"] = s.smtp_from or s.smtp_user, to, subject
+    msg["From"] = f"{s.email_from_name} <{_sender()}>"
+    msg["To"], msg["Subject"] = to, subject
     msg.set_content(body)
+    if s.smtp_port == 465:  # implicit TLS
+        with smtplib.SMTP_SSL(s.smtp_host, s.smtp_port, timeout=20) as server:
+            if s.smtp_user:
+                server.login(s.smtp_user, s.smtp_password)
+            server.send_message(msg)
+        return
     with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=20) as server:
         server.starttls()
         if s.smtp_user:
@@ -111,17 +133,67 @@ def _smtp_send(to: str, subject: str, body: str) -> None:
         server.send_message(msg)
 
 
+def email_problem() -> str:
+    """Why email can't be sent with the current settings, or '' if it's configured."""
+    s = get_settings()
+    p = s.email_provider
+    if p == "mock":
+        return ""
+    if p not in {"brevo", "resend", "smtp"}:
+        return f"Unknown EMAIL_PROVIDER '{p}'. Use brevo, resend or smtp."
+    if not _sender():
+        return "Set EMAIL_FROM to the sender address you verified with your email provider."
+    if p == "brevo" and not s.brevo_api_key:
+        return "Set BREVO_API_KEY (Brevo → SMTP & API → API keys)."
+    if p == "resend" and not s.resend_api_key:
+        return "Set RESEND_API_KEY (resend.com → API Keys)."
+    if p == "smtp" and not s.smtp_host:
+        return "Set SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASSWORD."
+    return ""
+
+
 async def send_email(to: str, subject: str, body: str) -> tuple[str, str]:
+    """Returns (status, error). status: sent | mock | failed."""
     s = get_settings()
     if s.email_provider == "mock":
         return "mock", ""
-    if s.email_provider != "smtp" or not s.smtp_host:
-        return "failed", "Email isn't configured. Set EMAIL_PROVIDER=smtp and the SMTP_* variables."
+    if problem := email_problem():
+        return "failed", problem
     try:
-        await asyncio.to_thread(_smtp_send, to, subject, body)
+        if s.email_provider == "smtp":
+            await asyncio.to_thread(_smtp_send, to, subject, body)
+            return "sent", ""
+        async with httpx.AsyncClient(timeout=20) as c:
+            if s.email_provider == "brevo":
+                r = await c.post("https://api.brevo.com/v3/smtp/email",
+                                 headers={"api-key": s.brevo_api_key, "accept": "application/json"},
+                                 json={"sender": {"name": s.email_from_name, "email": _sender()}, "to": [{"email": to}],
+                                       "subject": subject, "textContent": body})
+            else:  # resend
+                r = await c.post("https://api.resend.com/emails", headers={"Authorization": f"Bearer {s.resend_api_key}"},
+                                 json={"from": f"{s.email_from_name} <{_sender()}>", "to": [to], "subject": subject, "text": body})
+            r.raise_for_status()
         return "sent", ""
+    except httpx.HTTPStatusError as e:
+        return "failed", f"{e.response.status_code}: {e.response.text[:300]}"
     except Exception as e:
         return "failed", str(e)[:300]
+
+
+def sms_problem() -> str:
+    s = get_settings()
+    p = s.sms_provider
+    if p == "mock":
+        return ""
+    if p == "arkesel" and not s.arkesel_api_key:
+        return "Set ARKESEL_API_KEY (Arkesel dashboard → SMS API)."
+    if p == "hubtel" and not (s.hubtel_client_id and s.hubtel_client_secret):
+        return "Set HUBTEL_CLIENT_ID and HUBTEL_CLIENT_SECRET."
+    if p not in {"arkesel", "hubtel"}:
+        return f"Unknown SMS_PROVIDER '{p}'. Use arkesel or hubtel."
+    if not s.sms_sender_id or len(s.sms_sender_id) > 11:
+        return "SMS_SENDER_ID must be 1–11 characters and approved by your SMS provider."
+    return ""
 
 
 async def log(db: AsyncSession, pharmacy_id, channel: str, recipient: str, message: str, status: str, error: str, kind: str, subject: str = ""):

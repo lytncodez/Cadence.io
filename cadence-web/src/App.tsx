@@ -12,6 +12,8 @@ import Insights from "@/pages/Insights";
 import Alerts from "@/pages/Alerts";
 import Settings from "@/pages/Settings";
 import ResetPassword from "@/pages/ResetPassword";
+import Counter from "@/pages/Counter";
+import Signup from "@/pages/Signup";
 
 /*  /            public website
     /login       sign in (and "forgot password")
@@ -40,17 +42,19 @@ function Routes() {
 
   useEffect(() => {
     if (!user && inApp) navigate("/login", { replace: true });
-    if (user && p === "/login") navigate("/app", { replace: true });
+    if (user && (p === "/login" || p === "/signup")) navigate("/app", { replace: true });
   }, [user, p, inApp]);
 
   if (p === "/") return <Website />;
   if (p === "/login") return user ? null : <Login />;
   if (p === "/reset-password") return <ResetPassword />;
+  if (p === "/signup") return user ? null : <Signup />;
   if (!inApp) return <Website />;
   if (!user) return null;
   if (!ready) return <HexLoader label="Loading your pharmacy" />;
 
-  if (p === "/app") return <Overview />;
+  // Each role gets its own home: counter staff see what to dispense and pull; owners and pharmacists see the business.
+  if (p === "/app") return can("view_finance") ? <Overview /> : <Counter />;
   if (p === "/app/inventory") return <Inventory />;
   if (p === "/app/insights") return can("view_insights") ? <Insights /> : <Overview />;
   if (p === "/app/alerts") return <Alerts />;

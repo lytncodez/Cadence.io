@@ -24,11 +24,12 @@ async def sold_this_month(db: AsyncSession, batch_ids: list) -> dict:
     return {bid: int(total) for bid, total in rows.all()}
 
 
-def item_out(b: Batch, sold: int = 0) -> ItemOut:
+def item_out(b: Batch, sold: int = 0, finance: bool = True) -> ItemOut:
+    """`finance=False` leaves out the cost price, so margins and stock value can't be worked out from the payload."""
     p = b.product
     return ItemOut(
         id=str(b.id), name=p.name, category=p.category, barcode=p.barcode, batch=b.batch_no, expiry=b.expiry_date,
-        qty=b.qty, unit_cost=float(p.unit_cost), unit_price=float(p.unit_price), supplier=p.supplier or "—",
+        qty=b.qty, unit_cost=float(p.unit_cost) if finance else None, unit_price=float(p.unit_price), supplier=p.supplier or "—",
         sold_this_month=sold, reorder_level=p.reorder_level,
     )
 

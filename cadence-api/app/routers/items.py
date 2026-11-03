@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..deps import current_user, require
+from ..deps import can_see_finance, current_user, require
 from ..models import Batch, Product, User
 from ..schemas import ImportResult, ImportRowError, ItemCreate, ItemOut, ItemUpdate, ParseResult
 from ..serializers import item_out, sold_this_month
@@ -37,7 +37,8 @@ async def list_items(user: User = Depends(require("view_inventory")), db: AsyncS
         select(Batch).join(Product).where(Product.pharmacy_id == user.pharmacy_id).order_by(Batch.expiry_date)
     )).unique().all()
     sold = await sold_this_month(db, [b.id for b in batches])
-    return [item_out(b, sold.get(b.id, 0)) for b in batches]
+    fin = await can_see_finance(db, user)
+    return [item_out(b, sold.get(b.id, 0), fin) for b in batches]
 
 
 @router.get("/barcode/{code}", response_model=list[ItemOut])
@@ -46,7 +47,8 @@ async def by_barcode(code: str, user: User = Depends(current_user), db: AsyncSes
     batches = (await db.scalars(
         select(Batch).join(Product).where(Product.pharmacy_id == user.pharmacy_id, Product.barcode == code.strip()).order_by(Batch.expiry_date)
     )).unique().all()
-    return [item_out(b) for b in batches]
+    fin = await can_see_finance(db, user)
+    return [item_out(b, finance=fin) for b in batches]
 
 
 @router.post("", response_model=ItemOut, status_code=201)
@@ -69,7 +71,7 @@ async def create_item(body: ItemCreate, user: User = Depends(require("edit_inven
     db.add(batch)
     await db.commit()
     await db.refresh(batch, ["product"])
-    return item_out(batch)
+    return item_out(batch, finance=await can_see_finance(db, user))
 
 
 @router.patch("/{item_id}", response_model=ItemOut)
@@ -87,7 +89,7 @@ async def update_item(item_id: str, body: ItemUpdate, user: User = Depends(requi
     await db.commit()
     await db.refresh(b, ["product"])
     sold = await sold_this_month(db, [b.id])
-    return item_out(b, sold.get(b.id, 0))
+    return item_out(b, sold.get(b.id, 0), await can_see_finance(db, user))
 
 
 @router.delete("/{item_id}", status_code=204)

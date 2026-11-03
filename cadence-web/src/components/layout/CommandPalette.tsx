@@ -24,7 +24,7 @@ export function CommandPalette({ open, onClose, onTheme, onAddStock }: { open: b
       { id: "nav-inv", group: "Go to", label: "Inventory", icon: LuPackage, run: go("/app/inventory") },
       ...(can("view_insights") ? [{ id: "nav-ai", group: "Go to", label: "AI Insights", icon: LuSparkles, run: go("/app/insights") }] : []),
       { id: "nav-alerts", group: "Go to", label: "Alerts", icon: LuBell, run: go("/app/alerts") },
-      ...(can("manage_users") ? [{ id: "nav-set", group: "Go to", label: "Settings", icon: LuSettings, run: go("/app/settings") }] : []),
+      { id: "nav-set", group: "Go to", label: "Settings", icon: LuSettings, run: go("/app/settings") },
       { id: "nav-me", group: "Go to", label: "My profile", icon: LuUser, run: go("/app/profile") },
       ...(can("import") ? [{ id: "act-import", group: "Actions", label: "Import stock from CSV / Excel", icon: LuUpload, run: go("/app/inventory?import=1") }] : []),
       ...(can("edit_inventory") ? [{ id: "act-add", group: "Actions", label: "Add stock", hint: "N", icon: LuPlus, run: onAddStock }] : []),
@@ -34,7 +34,7 @@ export function CommandPalette({ open, onClose, onTheme, onAddStock }: { open: b
     ];
     const batches: Cmd[] = items.map((i) => enrich(i, thresholds)).sort((a, b) => a.days - b.days).map((b) => ({
       id: b.id, group: "Batches", label: `${b.name}`, hint: `${b.batch} · ${relDays(b.days)}`, icon: LuPill, status: b.status,
-      keywords: `${b.barcode} ${b.batch} ${b.category}`, run: () => navigate(`/app/inventory?batch=${b.id}`),
+      keywords: `${b.barcode} ${b.batch} ${b.category} ${b.supplier}`, run: () => navigate(`/app/inventory?batch=${encodeURIComponent(b.id)}`),
     }));
     return [...base, ...batches];
   }, [items, thresholds, can, onTheme, onAddStock]);

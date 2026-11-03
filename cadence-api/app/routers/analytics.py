@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..deps import current_user
+from ..deps import require
 from ..models import Sale, User
 from ..schemas import MonthOut
 
@@ -27,7 +27,7 @@ def months_back(n: int) -> list[tuple[int, int]]:
 
 
 @router.get("/monthly", response_model=list[MonthOut])
-async def monthly(months: int = 6, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+async def monthly(months: int = 6, user: User = Depends(require("view_finance")), db: AsyncSession = Depends(get_db)):
     """Revenue and cost of goods sold for the last `months` calendar months (oldest first).
     Aggregated in Python so the same code runs on Postgres and on SQLite in tests."""
     window = months_back(max(2, min(months, 24)))

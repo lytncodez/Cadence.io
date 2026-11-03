@@ -15,6 +15,7 @@ from decimal import Decimal
 from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .crypto import EncryptedText
 from .db import Base
 
 
@@ -55,9 +56,9 @@ class User(Base):
     status: Mapped[str] = mapped_column(String(20), default="Active")  # Active | Invited | Suspended
     position: Mapped[str] = mapped_column(String(120), default="")
     staff_id: Mapped[str] = mapped_column(String(40), default="")
-    phone: Mapped[str] = mapped_column(String(40), default="")
+    phone: Mapped[str] = mapped_column(EncryptedText, default="")  # encrypted at rest
     department: Mapped[str] = mapped_column(String(80), default="")
-    reg_no: Mapped[str] = mapped_column(String(60), default="")
+    reg_no: Mapped[str] = mapped_column(EncryptedText, default="")  # PSGH registration no., encrypted at rest
     bio: Mapped[str] = mapped_column(Text, default="")
     photo: Mapped[str] = mapped_column(Text, default="")  # data URL for now; move to object storage later
     joined: Mapped[date] = mapped_column(Date, default=date.today)
@@ -110,9 +111,9 @@ class NotificationSettings(Base):
     __tablename__ = "notification_settings"
     pharmacy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pharmacies.id", ondelete="CASCADE"), primary_key=True)
     sms_enabled: Mapped[bool] = mapped_column(default=True)
-    sms_numbers: Mapped[str] = mapped_column(String(400), default="")
+    sms_numbers: Mapped[str] = mapped_column(EncryptedText, default="")  # encrypted at rest
     email_enabled: Mapped[bool] = mapped_column(default=False)
-    email: Mapped[str] = mapped_column(String(254), default="")
+    email: Mapped[str] = mapped_column(EncryptedText, default="")  # encrypted at rest
     digest_time: Mapped[str] = mapped_column(String(5), default="07:30")  # HH:MM, Ghana time (UTC)
     on_expired: Mapped[bool] = mapped_column(default=True)
     on_critical: Mapped[bool] = mapped_column(default=True)
@@ -134,7 +135,7 @@ class NotificationLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     pharmacy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pharmacies.id", ondelete="CASCADE"), index=True)
     channel: Mapped[str] = mapped_column(String(10))  # sms | email
-    recipient: Mapped[str] = mapped_column(String(254))
+    recipient: Mapped[str] = mapped_column(EncryptedText)  # phone numbers / emails, encrypted at rest
     subject: Mapped[str] = mapped_column(String(200), default="")
     message: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(10))  # sent | mock | failed
@@ -161,10 +162,10 @@ class DemoRequest(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(120))
     pharmacy: Mapped[str] = mapped_column(String(160))
-    phone: Mapped[str] = mapped_column(String(40))
-    email: Mapped[str] = mapped_column(String(254), default="")
+    phone: Mapped[str] = mapped_column(EncryptedText)  # encrypted at rest
+    email: Mapped[str] = mapped_column(EncryptedText, default="")  # encrypted at rest
     branches: Mapped[str] = mapped_column(String(40), default="")
-    message: Mapped[str] = mapped_column(Text, default="")
+    message: Mapped[str] = mapped_column(EncryptedText, default="")  # encrypted at rest
     status: Mapped[str] = mapped_column(String(20), default="new")  # new | contacted | booked | closed
     notified: Mapped[str] = mapped_column(String(200), default="")  # e.g. "email:sent sms:mock"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

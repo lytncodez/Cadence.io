@@ -20,8 +20,13 @@ class Settings(BaseSettings):
     hubtel_client_id: str = ""
     hubtel_client_secret: str = ""
 
-    # Email: mock (log only) | smtp
+    # Email: mock (log only) | brevo | resend | smtp
+    # Render's free plan blocks SMTP ports, so use brevo or resend (HTTPS APIs) there; smtp works locally and on paid plans.
     email_provider: str = "mock"
+    email_from: str = ""  # the verified sender address, e.g. alerts@yourpharmacy.com
+    email_from_name: str = "Cadence"
+    brevo_api_key: str = ""
+    resend_api_key: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -37,9 +42,15 @@ class Settings(BaseSettings):
     # Public address of the web app, used in password-reset links (no trailing slash).
     app_url: str = "http://localhost:5173"
     reset_link_minutes: int = 60
+    # Let pharmacies create their own account from the website. Set to false to only add pharmacies yourself.
+    signup_enabled: bool = True
+
     # Where "Book a demo" requests from the website are sent (leave blank to only store them).
     demo_notify_email: str = ""
     demo_notify_sms: str = ""
+
+    # Fernet key(s) for encrypting personal data at rest (comma-separated; the first one encrypts). See app/crypto.py.
+    data_encryption_key: str = ""
 
     # Shared secret for an external cron (e.g. cron-job.org) to trigger the daily digest.
     cron_secret: str = ""

@@ -2,18 +2,19 @@ import { useEffect, useState } from "react";
 import { TabGroup, TabList, Tab, TabPanels, TabPanel } from "@headlessui/react";
 import {
   LuUsers, LuStore, LuRefreshCw, LuPalette, LuShieldCheck, LuBell, LuGlobe, LuDatabase, LuInfo, LuSun, LuMoon, LuMonitor, LuCheck,
-  LuLock, LuLogOut, LuDownload, LuUpload, LuArrowRight, LuKeyboard, LuMail, LuMessageSquare,
+  LuLock, LuLogOut, LuDownload, LuUpload, LuArrowRight, LuKeyboard, LuMail, LuMessageSquare, LuUserPlus, LuPlug, LuSparkles, LuClock, LuKeyRound, LuRefreshCw as LuRetry,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { AppShell } from "@/components/layout/AppShell";
 import { Avatar, Button, Card, CardHeader, Field, Input, Kbd, Toggle } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/overlay";
 import { api, auth, useCan, useCurrentUser, useStore, USE_MOCK, API_URL } from "@/lib/api";
-import { alerts, savePharmacy, type NotifySettings } from "@/lib/features";
+import { alerts, integrations as integrationsApi, savePharmacy, type Integration, type Integrations, type NotifySettings, type SendResult } from "@/lib/features";
 import { setPrefs, usePrefs, type Prefs, type ThemeChoice } from "@/lib/theme";
 import { Link, navigate, usePath } from "@/lib/router";
 import { cn, fmtDate, fmtStamp, todayISO, type DateFormat } from "@/lib/utils";
 import { ChangePassword } from "@/pages/Profile";
+import { InviteDialog } from "@/components/InviteDialog";
 
 const VERSION = "0.4.0";
 
@@ -25,6 +26,7 @@ export default function Settings() {
     { key: "account", label: "Account & security", icon: LuShieldCheck, show: true },
     { key: "notifications", label: "Notifications", icon: LuBell, show: true },
     { key: "regional", label: "Region & format", icon: LuGlobe, show: true },
+    { key: "integrations", label: "Integrations", icon: LuPlug, show: can("manage_alerts") || can("company") },
     { key: "data", label: "Data", icon: LuDatabase, show: can("view_inventory") },
     { key: "team", label: "Team", icon: LuUsers, show: can("manage_users") },
     { key: "pharmacy", label: "Pharmacy & expiry rules", icon: LuStore, show: can("company") || can("manage_users") },
@@ -34,7 +36,7 @@ export default function Settings() {
   const [idx, setIdx] = useState(() => Math.max(0, tabs.findIndex((t) => t.key === wanted)));
   void path;
   const panel = (k: string) => k === "appearance" ? <Appearance /> : k === "account" ? <Account /> : k === "notifications" ? <Notifications /> : k === "regional" ? <Regional />
-    : k === "data" ? <DataTab /> : k === "team" ? <Team /> : k === "pharmacy" ? <PharmacyForm /> : <About />;
+    : k === "integrations" ? <IntegrationsTab /> : k === "data" ? <DataTab /> : k === "team" ? <Team /> : k === "pharmacy" ? <PharmacyForm /> : <About />;
   return (
     <AppShell title="Settings">
       <div className="mb-5"><h2 className="font-display text-[28px] font-bold">Settings</h2><p className="text-sm text-muted">How Cadence looks, your account, alerts, formats and your pharmacy's rules.</p></div>
@@ -191,9 +193,11 @@ function DataTab() {
   const toast = useToast();
   const items = useStore((s) => s.items);
   function exportCsv() {
-    const cols = ["name", "category", "barcode", "batch", "expiry", "qty", "unit_cost", "unit_price", "supplier", "reorder_level", "sold_this_month"] as const;
+    // Cost prices only go into the file for people allowed to see finances.
+    const fin = can("view_finance");
+    const cols = ["name", "category", "barcode", "batch", "expiry", "qty", ...(fin ? ["unit_cost"] : []), "unit_price", "supplier", "reorder_level", "sold_this_month"];
     const esc = (v: unknown) => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-    const lines = [cols.join(","), ...items.map((i) => [i.name, i.category, i.barcode, i.batch, i.expiry, i.qty, i.unitCost, i.unitPrice, i.supplier, i.reorderLevel, i.soldThisMonth].map(esc).join(","))];
+    const lines = [cols.join(","), ...items.map((i) => [i.name, i.category, i.barcode, i.batch, i.expiry, i.qty, ...(fin ? [i.unitCost] : []), i.unitPrice, i.supplier, i.reorderLevel, i.soldThisMonth].map(esc).join(","))];
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `cadence-inventory-${todayISO()}.csv` });
     a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -223,6 +227,52 @@ function DataTab() {
   );
 }
 
+function IntegrationsTab() {
+  const toast = useToast();
+  const [data, setData] = useState<Integrations | null>(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, SendResult>>({});
+  const load = () => { setErr(""); integrationsApi.get().then(setData, (e) => setErr((e as Error).message)); };
+  useEffect(load, []);
+  async function test(key: string, fn: () => Promise<SendResult>) {
+    setBusy(key);
+    try { const r = await fn(); setResults((x) => ({ ...x, [key]: r })); toast({ message: r.status === "failed" ? "Test failed: see the details" : r.status === "mock" ? "Demo mode: nothing was sent" : "Test sent", tone: r.status === "failed" ? "error" : "success" }); }
+    catch (e) { toast({ message: (e as Error).message, tone: "error" }); } finally { setBusy(null); }
+  }
+  const rows: { key: keyof Integrations; title: string; icon: IconType; test?: () => Promise<SendResult>; testLabel?: string }[] = [
+    { key: "sms", title: "SMS alerts", icon: LuMessageSquare, test: alerts.testSms, testLabel: "Send test SMS" },
+    { key: "email", title: "Email", icon: LuMail, test: alerts.testEmail, testLabel: "Send test email" },
+    { key: "ai", title: "AI insights", icon: LuSparkles, test: integrationsApi.testAi, testLabel: "Test AI" },
+    { key: "digest", title: "Daily digest schedule", icon: LuClock },
+    { key: "encryption", title: "Encryption of personal data", icon: LuKeyRound },
+  ];
+  const chip = (i: Integration) => i.status === "live" ? <span className="rounded-full bg-safe-soft px-2.5 py-0.5 text-xs font-semibold text-safe-ink">Live</span>
+    : i.status === "demo" ? <span className="rounded-full bg-sunken px-2.5 py-0.5 text-xs font-semibold text-muted">Demo</span>
+    : <span className="rounded-full bg-soon-soft px-2.5 py-0.5 text-xs font-semibold text-soon-ink">Needs setup</span>;
+  return (
+    <div className="grid gap-4">
+      <Card>
+        <CardHeader title="Services" subtitle="Switched on in the server's settings (Render → Environment). Tests go to the numbers and email saved on the Alerts page." action={<Button size="sm" variant="ghost" onClick={load}><LuRetry />Refresh</Button>} />
+        {err && <p role="alert" className="mx-5 mb-4 rounded-xl bg-critical-soft px-3.5 py-3 text-sm text-critical-ink">{err}</p>}
+        {!data ? <p className="px-5 pb-5 text-sm text-muted">{err ? "" : "Checking…"}</p> : rows.map((r) => {
+          const i = data[r.key], res = results[r.key];
+          return (
+            <div key={r.key} className="border-t border-line px-5 py-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand-ink"><r.icon className="size-4" /></span>
+                <div className="min-w-0 flex-1 basis-56"><p className="flex items-center gap-2 font-medium">{r.title}{chip(i)}</p><p className="text-sm text-muted">{i.detail}</p></div>
+                {r.test && <Button size="sm" loading={busy === r.key} onClick={() => test(r.key, r.test!)}>{r.testLabel}</Button>}
+              </div>
+              {res && <p className={cn("mt-3 ml-12 rounded-xl px-3 py-2 text-sm", res.status === "failed" ? "bg-critical-soft text-critical-ink" : res.status === "mock" ? "bg-brand-soft text-brand-ink" : "bg-safe-soft text-safe-ink")}>{res.detail || (res.status === "sent" ? "Sent." : "")}</p>}
+            </div>
+          );
+        })}
+      </Card>
+    </div>
+  );
+}
+
 function About() {
   const keys: [string, string][] = [["⌘K / Ctrl K", "Search and commands"], ["/", "Open search"], ["N", "Add stock"], ["Esc", "Close a dialog"]];
   return (
@@ -242,9 +292,11 @@ function About() {
 
 function Team() {
   const users = useStore((s) => s.users);
+  const [invite, setInvite] = useState(() => /[?&]invite=1/.test(location.search + location.hash));
   return (
     <Card>
-      <CardHeader title={`${users.length} people`} subtitle="Open a profile to see details or change someone's role." />
+      <CardHeader title={`${users.length} ${users.length === 1 ? "person" : "people"}`} subtitle="Open a profile to see details, change someone's role or resend an invite." action={<Button variant="primary" onClick={() => setInvite(true)}><LuUserPlus />Invite</Button>} />
+      <InviteDialog open={invite} onClose={() => setInvite(false)} />
       <ul className="grid gap-3 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-4">
         {users.map((u, i) => (
           <li key={u.id} className="animate-fade-up" style={{ animationDelay: `${i * 50}ms` }}>

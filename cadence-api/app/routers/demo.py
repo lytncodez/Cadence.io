@@ -1,10 +1,8 @@
 """Public "Book a demo" form on the website. No sign-in; protected by a honeypot field and a per-address rate limit."""
-import time
-from collections import defaultdict, deque
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import ratelimit
 from ..config import get_settings
 from ..db import get_db
 from ..models import DemoRequest
@@ -13,29 +11,13 @@ from ..services.notify import numbers, send_email, send_sms
 
 router = APIRouter(prefix="/demo-requests", tags=["website"])
 LIMIT, WINDOW = 5, 3600  # 5 requests per hour per address
-_hits: dict[str, deque] = defaultdict(deque)
-
-
-def _client(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")  # Render sits behind a proxy
-    return fwd.split(",")[0].strip() or (request.client.host if request.client else "unknown")
-
-
-def _limited(key: str) -> bool:
-    now, q = time.monotonic(), _hits[key]
-    while q and now - q[0] > WINDOW:
-        q.popleft()
-    if len(q) >= LIMIT:
-        return True
-    q.append(now)
-    return False
 
 
 @router.post("", response_model=DemoRequestOut, status_code=201)
 async def create(body: DemoRequestIn, request: Request, db: AsyncSession = Depends(get_db)):
     if body.website:  # a bot filled the hidden field: pretend it worked, store nothing
         return DemoRequestOut()
-    if _limited(_client(request)):
+    if ratelimit.hit(f"demo:{ratelimit.client_ip(request)}", LIMIT, WINDOW):
         raise HTTPException(429, "Too many requests from this connection. Try again in an hour, or call us.")
     s = get_settings()
     row = DemoRequest(name=body.name.strip(), pharmacy=body.pharmacy.strip(), phone=body.phone.strip(),

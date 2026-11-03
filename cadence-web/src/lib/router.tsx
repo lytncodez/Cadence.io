@@ -4,7 +4,8 @@ import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from
 
 const HASH = import.meta.env.VITE_ROUTER === "hash";
 
-const read = () => (HASH ? location.hash.replace(/^#/, "") || "/" : location.pathname) || "/";
+// The path includes any ?query, in both modes, so pages can read deep links like /app/inventory?status=critical.
+const read = () => (HASH ? location.hash.replace(/^#/, "") || "/" : location.pathname + location.search) || "/";
 const subs = new Set<() => void>();
 const notify = () => subs.forEach((f) => f());
 window.addEventListener(HASH ? "hashchange" : "popstate", notify);
@@ -46,4 +47,10 @@ export function Link({ to, onClick, ...rest }: AnchorHTMLAttributes<HTMLAnchorEl
       }}
     />
   );
+}
+
+/** Query-string parameters of the current route, e.g. useQuery().get("status"). */
+export function useQuery() {
+  const path = usePath();
+  return new URLSearchParams(path.split("?")[1] ?? "");
 }

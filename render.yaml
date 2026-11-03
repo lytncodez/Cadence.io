@@ -1,9 +1,13 @@
-# Render Blueprint: Render → New → Blueprint → pick this repo.
-# The database lives on Neon; paste its connection string into DATABASE_URL when Render asks.
+# Render Blueprint (keep this file at the ROOT of the repo, next to cadence-api/ and cadence-web/).
+# Render → New → Blueprint → pick this repo. The database lives on Neon; paste its connection string
+# into DATABASE_URL when Render asks.
 services:
   - type: web
     name: cadence-api
     runtime: docker
+    rootDir: cadence-api       # the API lives in this folder of the monorepo
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     region: frankfurt          # closest Render region to Ghana; match your Neon region
     healthCheckPath: /health
@@ -25,21 +29,27 @@ services:
         value: Cadence
       - key: ARKESEL_API_KEY
         sync: false
+      - key: HUBTEL_CLIENT_ID
+        sync: false
+      - key: HUBTEL_CLIENT_SECRET
+        sync: false
       - key: EMAIL_PROVIDER
-        value: mock
-      - key: SMTP_HOST
+        value: mock            # brevo or resend on the free plan (it blocks SMTP)
+      - key: EMAIL_FROM
         sync: false
-      - key: SMTP_USER
+      - key: EMAIL_FROM_NAME
+        value: Cadence
+      - key: BREVO_API_KEY
         sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: SMTP_FROM
+      - key: RESEND_API_KEY
         sync: false
       - key: AI_PROVIDER
         value: mock
       - key: AI_MODEL
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
         sync: false
       - key: CRON_SECRET
         generateValue: true
@@ -48,4 +58,8 @@ services:
       - key: DEMO_NOTIFY_EMAIL
         sync: false
       - key: DEMO_NOTIFY_SMS
+        sync: false
+      - key: SIGNUP_ENABLED
+        value: "true"
+      - key: DATA_ENCRYPTION_KEY
         sync: false

@@ -138,6 +138,8 @@ export default function Login() {
               <Button type="submit" variant="primary" size="lg" loading={busy === "form"} className="mt-1 w-full">Log in<LuArrowRight /></Button>
             </div>
 
+            <p className="mt-6 text-center text-sm text-muted">New pharmacy? <Link to="/signup" className="font-medium text-brand-ink hover:underline">Create an account</Link></p>
+
             {USE_MOCK && (
               <div className="mt-8">
                 <div className="flex items-center gap-3 text-xs text-muted"><span className="h-px flex-1 bg-line" />Demo accounts · password <code className="font-mono text-ink-2">{DEMO_PASSWORD}</code><span className="h-px flex-1 bg-line" /></div>
