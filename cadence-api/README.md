@@ -103,7 +103,7 @@ Everything works in **mock** mode first: messages appear in the delivery logs bu
 **Go-live checklist** (Render → Environment)
 | Variable | Value |
 |---|---|
-| `SMS_PROVIDER` · `ARKESEL_API_KEY` · `SMS_SENDER_ID` | `arkesel` · your key · the approved sender ID |
+| `SMS_PROVIDER` · `AFRICASTALKING_USERNAME` · `AFRICASTALKING_API_KEY` · `SMS_SENDER_ID` | `africastalking` · your app username · its API key · approved sender ID (or empty) |
 | `EMAIL_PROVIDER` · `BREVO_API_KEY` · `EMAIL_FROM` | `brevo` · your key · the verified sender address |
 | `AI_PROVIDER` · `ANTHROPIC_API_KEY` · `AI_MODEL` | `anthropic` · your key · `claude-haiku-5-5` |
 | `HQ_NOTIFY_EMAIL` · `HQ_NOTIFY_SMS` | your inbox · your phone |
@@ -125,6 +125,12 @@ Then: HQ → System → send yourself a test email, a test SMS and **Test AI**. 
 | HQ daily email (AI briefing, sign-ups, at-risk, open help) | `HQ_NOTIFY_EMAIL` | email |
 
 Team members who can't see finance (dispensers by default) get the same alerts with every money figure left out.
+
+**SMS: Africa's Talking**
+1. Sign up at africastalking.com. Try it first in the **sandbox**: username `sandbox`, the sandbox API key (Sandbox app → Settings → API Key). Texts then appear in the simulator at simulator.africastalking.com instead of real phones.
+2. For real texts: create a live app (or use your live username), top up credit, and copy that app's **API key** (Settings → API Key). Request a **sender ID** (e.g. `Cadence`, up to 11 characters) under SMS → Sender IDs; until it's approved, leave `SMS_SENDER_ID` empty and Africa's Talking uses its default sender.
+3. Render: `SMS_PROVIDER=africastalking`, `AFRICASTALKING_USERNAME=<your app username>`, `AFRICASTALKING_API_KEY=…`, `SMS_SENDER_ID=<approved ID or empty>`.
+4. HQ → System → **SMS** test to your own number, then a pharmacy's Alerts → **Test SMS**. Africa's Talking's exact reason (e.g. `InsufficientBalance`, `InvalidSenderId`) shows in the delivery log if a text fails.
 
 **SMS: Arkesel (Ghana)**
 1. Sign up at arkesel.com, top up a little credit, and request a **sender ID** (e.g. `Cadence` or your pharmacy's short name, up to 11 characters). Approval can take a day or two.
@@ -154,7 +160,7 @@ Render's free plan sleeps, so use a free scheduler:
 2. Advanced → header `X-Cron-Secret` = the `CRON_SECRET` value from Render.
 Each pharmacy gets one digest a day after its "Send at" time (Ghana time), and the weekly AI report on its chosen day. You get the HQ email once a day after `HQ_DIGEST_TIME`.
 
-**Costs to expect:** Brevo free covers 300 emails a day. Arkesel charges per SMS segment (160 characters). AI uses a few cents a day per pharmacy with `claude-haiku-5-5`: one short call for the digest note, one a week for the report, plus questions people ask.
+**Costs to expect:** Brevo free covers 300 emails a day. SMS providers charge per segment (160 characters). AI uses a few cents a day per pharmacy with `claude-haiku-5-5`: one short call for the digest note, one a week for the report, plus questions people ask.
 
 ## Cadence HQ (for you, not for pharmacies)
 `<your site>/hq` is a separate console with its own logins (table `platform_admins`, tokens scoped to HQ). Pharmacy logins can't open it, and HQ logins can't open any pharmacy's stock.

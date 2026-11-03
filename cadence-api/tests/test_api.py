@@ -580,3 +580,28 @@ def test_cron_sends_digests_weekly_and_hq_digest(client, monkeypatch):
     assert set(r) == {"messages", "weekly", "hq_digest"} and r["hq_digest"] == "mock"
     again = client.post("/api/v1/alerts/cron", headers={"X-Cron-Secret": "cron-test-secret"}).json()
     assert again["hq_digest"] == "skipped"  # once a day
+
+
+def test_africastalking_settings_and_send(monkeypatch):
+    import httpx
+    from app.config import get_settings
+    from app.services import notify
+    s = get_settings()
+    monkeypatch.setattr(s, "sms_provider", "africastalking")
+    monkeypatch.setattr(s, "africastalking_username", "")
+    assert "AFRICASTALKING_USERNAME" in notify.sms_problem()
+    monkeypatch.setattr(s, "africastalking_username", "sandbox")
+    monkeypatch.setattr(s, "africastalking_api_key", "test-key")
+    monkeypatch.setattr(s, "sms_sender_id", "")
+    assert notify.sms_problem() == "" and "SANDBOX" in notify.sms_live_detail()
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"], seen["body"], seen["key"] = str(request.url), request.content.decode(), request.headers.get("apiKey")
+        return httpx.Response(201, json={"SMSMessageData": {"Message": "Sent to 1/1", "Recipients": [
+            {"statusCode": 101, "number": "+233245550142", "status": "Success", "cost": "GHS 0.05", "messageId": "ATX1"}]}})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    assert asyncio.run(notify.send_sms(notify.numbers("024 555 0142"), "Cadence test")) == ("sent", "")
+    assert seen["url"] == "https://api.sandbox.africastalking.com/version1/messaging" and seen["key"] == "test-key"
+    assert "to=%2B233245550142" in seen["body"] and "username=sandbox" in seen["body"] and "from=" not in seen["body"]

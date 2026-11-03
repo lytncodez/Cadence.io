@@ -13,9 +13,12 @@ class Settings(BaseSettings):
     seed_password: str = "cadence2026"
     api_prefix: str = "/api/v1"
 
-    # SMS: mock (log only) | arkesel | hubtel
+    # SMS: mock (log only) | africastalking | arkesel | hubtel
     sms_provider: str = "mock"
-    sms_sender_id: str = "Cadence"  # max 11 characters, registered with your provider
+    # Max 11 characters, approved by your provider. Africa's Talking: leave blank to use their default sender until yours is approved.
+    sms_sender_id: str = ""
+    africastalking_username: str = ""  # your app's username; "sandbox" sends to the Africa's Talking simulator instead of real phones
+    africastalking_api_key: str = ""
     arkesel_api_key: str = ""
     hubtel_client_id: str = ""
     hubtel_client_secret: str = ""

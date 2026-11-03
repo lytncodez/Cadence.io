@@ -38,8 +38,7 @@ def _row(provider: str, problem: str, live_detail: str, demo_detail: str) -> Int
 async def integrations(user: User = Depends(require("manage_alerts", "company"))):
     s = get_settings()
     return IntegrationsOut(
-        sms=_row(s.sms_provider, notify.sms_problem(), f"Sending as {s.sms_sender_id!r} via {s.sms_provider.title()}.",
-                 "Demo mode: messages are logged, not sent. Set SMS_PROVIDER=arkesel (or hubtel) and its key."),
+        sms=_row(s.sms_provider, notify.sms_problem(), notify.sms_live_detail(), notify.SMS_DEMO_DETAIL),
         email=_row(s.email_provider, notify.email_problem(), f"Sending from {s.email_from or s.smtp_from or s.smtp_user} via {s.email_provider.title()}.",
                    "Demo mode: emails are logged, not sent. Set EMAIL_PROVIDER=brevo (or resend), its API key and EMAIL_FROM."),
         ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {s.ai_model}. Answers general questions too.",

@@ -129,6 +129,8 @@ async def send_sms(to: list[str], message: str) -> tuple[str, str]:
         return "failed", "No valid phone numbers."
     try:
         async with httpx.AsyncClient(timeout=15) as c:
+            if s.sms_provider == "africastalking":
+                return await _send_africastalking(c, to, message)
             if s.sms_provider == "arkesel":
                 r = await c.post("https://sms.arkesel.com/api/v2/sms/send", headers={"api-key": s.arkesel_api_key},
                                  json={"sender": s.sms_sender_id[:11], "message": message, "recipients": to})
@@ -151,6 +153,34 @@ async def send_sms(to: list[str], message: str) -> tuple[str, str]:
         return "failed", f"{e.response.status_code}: {e.response.text[:300]}"
     except Exception as e:
         return "failed", str(e)[:300]
+
+
+AT_OK = {100, 101, 102}  # Processed, Sent, Queued
+
+
+async def _send_africastalking(c: httpx.AsyncClient, to: list[str], message: str) -> tuple[str, str]:
+    """Africa's Talking bulk SMS. Numbers go as +233..., comma-separated. The username "sandbox" uses their simulator."""
+    s = get_settings()
+    sandbox = s.africastalking_username.strip().lower() == "sandbox"
+    url = f"https://api.{'sandbox.' if sandbox else ''}africastalking.com/version1/messaging"
+    form = {"username": s.africastalking_username.strip(), "to": ",".join("+" + n.lstrip("+") for n in to), "message": message}
+    if s.sms_sender_id.strip():
+        form["from"] = s.sms_sender_id.strip()[:11]
+    r = await c.post(url, data=form, headers={"apiKey": s.africastalking_api_key, "Accept": "application/json"})
+    if r.status_code >= 400:
+        return "failed", f"{r.status_code}: {r.text[:300]}"
+    try:
+        data = r.json().get("SMSMessageData", {})
+    except ValueError:
+        return "failed", f"Unexpected reply from Africa's Talking: {r.text[:300]}"
+    recipients = data.get("Recipients") or []
+    bad = [f"{x.get('number', '?')}: {x.get('status', 'failed')}" for x in recipients if int(x.get("statusCode", 0) or 0) not in AT_OK]
+    if not recipients:  # e.g. "InvalidSenderId" or "Invalid phone numbers" with no recipients at all
+        return "failed", str(data.get("Message") or r.text)[:300]
+    if bad:
+        sent = len(recipients) - len(bad)
+        return ("failed" if not sent else "sent"), ("; ".join(bad) + (f" ({sent} of {len(recipients)} sent)" if sent else ""))[:300]
+    return "sent", ""
 
 
 def _sender() -> str:
@@ -224,17 +254,35 @@ async def send_email(to: str, subject: str, body: str) -> tuple[str, str]:
         return "failed", str(e)[:300]
 
 
+def sms_live_detail() -> str:
+    s = get_settings()
+    name = {"africastalking": "Africa's Talking", "arkesel": "Arkesel", "hubtel": "Hubtel"}.get(s.sms_provider, s.sms_provider)
+    if s.sms_provider == "africastalking" and s.africastalking_username.strip().lower() == "sandbox":
+        return "Africa's Talking SANDBOX: texts go to the simulator at simulator.africastalking.com, not real phones."
+    who = f"as {s.sms_sender_id.strip()!r}" if s.sms_sender_id.strip() else "with the provider's default sender ID"
+    return f"Sending {who} via {name}."
+
+
+SMS_DEMO_DETAIL = "Demo mode: texts are logged, not sent. Set SMS_PROVIDER=africastalking, AFRICASTALKING_USERNAME and AFRICASTALKING_API_KEY."
+
+
 def sms_problem() -> str:
     s = get_settings()
     p = s.sms_provider
     if p == "mock":
+        return ""
+    if p == "africastalking":
+        if not s.africastalking_username.strip() or not s.africastalking_api_key:
+            return "Set AFRICASTALKING_USERNAME and AFRICASTALKING_API_KEY (Africa's Talking dashboard → Settings → API Key)."
+        if len(s.sms_sender_id.strip()) > 11:
+            return "SMS_SENDER_ID must be at most 11 characters (or blank to use Africa's Talking's default)."
         return ""
     if p == "arkesel" and not s.arkesel_api_key:
         return "Set ARKESEL_API_KEY (Arkesel dashboard → SMS API)."
     if p == "hubtel" and not (s.hubtel_client_id and s.hubtel_client_secret):
         return "Set HUBTEL_CLIENT_ID and HUBTEL_CLIENT_SECRET."
     if p not in {"arkesel", "hubtel"}:
-        return f"Unknown SMS_PROVIDER '{p}'. Use arkesel or hubtel."
+        return f"Unknown SMS_PROVIDER '{p}'. Use africastalking, arkesel or hubtel."
     if not s.sms_sender_id or len(s.sms_sender_id) > 11:
         return "SMS_SENDER_ID must be 1–11 characters and approved by your SMS provider."
     return ""

@@ -54,8 +54,7 @@ async def system(admin: PlatformAdmin = Depends(current_hq_admin)):
     s = get_settings()
     hq_email, hq_sms = hq_digest.recipient(), s.hq_notify_sms or s.demo_notify_sms
     return HqSystem(
-        sms=_row(s.sms_provider, notify.sms_problem(), f"Sending as {s.sms_sender_id!r} via {s.sms_provider.title()}.",
-                 "Demo mode: texts are logged, not sent. Set SMS_PROVIDER=arkesel, ARKESEL_API_KEY and SMS_SENDER_ID."),
+        sms=_row(s.sms_provider, notify.sms_problem(), notify.sms_live_detail(), notify.SMS_DEMO_DETAIL),
         email=_row(s.email_provider, notify.email_problem(), f"Sending from {s.email_from or s.smtp_from or s.smtp_user} via {s.email_provider.title()}.",
                    "Demo mode: emails are logged, not sent. Set EMAIL_PROVIDER=brevo (or resend), its API key and EMAIL_FROM."),
         ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {s.ai_model}.",
