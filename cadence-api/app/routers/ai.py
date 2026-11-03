@@ -8,6 +8,8 @@ from ..schemas import AskIn, AskOut
 from ..services import ai
 from ..services.analytics import summarize, summarize_rows
 
+from ..services import usage
+
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 
@@ -19,6 +21,8 @@ async def chat(body: AskIn, user: User = Depends(require("view_insights")), db: 
         s = summarize_rows(body.rows, body.dataset_name or "your uploaded file", ph.critical_days, ph.soon_days)
     else:
         s = await summarize(db, user)
+    usage.record(db, user.pharmacy_id, "ai_question", user.id)  # counted, never stored: the question itself isn't kept
+    await db.commit()
     return await ai.answer(body.message, s, body.history)
 
 

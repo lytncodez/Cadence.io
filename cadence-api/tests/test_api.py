@@ -390,3 +390,63 @@ def test_email_and_sms_report_missing_settings(monkeypatch):
     assert "ARKESEL_API_KEY" in notify.sms_problem()
     status, detail = asyncio.run(notify.send_sms(["233245550142"], "hi"))
     assert status == "failed" and "ARKESEL_API_KEY" in detail
+
+
+# ---------- Cadence HQ ----------
+def _make_hq_admin(email="hq@cadence.example", password="hq-password-2026!"):
+    import sqlite3
+    import uuid as _uuid
+    from app.security import hash_password
+    con = sqlite3.connect("test_cadence.db")
+    con.execute("INSERT INTO platform_admins (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+                (_uuid.uuid4().hex, email, "Miriam", hash_password(password)))
+    con.commit()
+    con.close()
+    return email, password
+
+
+def test_help_request_reaches_hq_and_reply_comes_back(client):
+    h = login(client, "abena@harbourview.example")
+    r = client.post("/api/v1/support/tickets", json={"category": "cant_dispense", "urgency": "urgent",
+                                                     "message": "The inventory page won't load at the counter."}, headers=h)
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+    email, pw = _make_hq_admin()
+    hq = _bearer(client.post("/api/v1/hq/auth/login", json={"email": email, "password": pw}))
+    tickets = client.get("/api/v1/hq/tickets", headers=hq).json()
+    t = next(x for x in tickets if x["id"] == tid)
+    assert t["pharmacyName"] == "Harbour View Pharmacy" and t["urgency"] == "urgent" and t["status"] == "open"
+    assert client.patch(f"/api/v1/hq/tickets/{tid}", json={"status": "acknowledged", "reply": "On it, calling you now."}, headers=hq).status_code == 200
+    mine = client.get("/api/v1/support/tickets", headers=h).json()
+    assert mine[0]["status"] == "acknowledged" and mine[0]["reply"] == "On it, calling you now."
+    # Other pharmacies don't see Harbour View's requests
+    b = _bearer(client.post("/api/v1/auth/login", json={"email": "ama@osu.example", "password": "osu-pharmacy-2026"}))
+    assert all(x["id"] != tid for x in client.get("/api/v1/support/tickets", headers=b).json())
+
+
+def test_hq_sees_usage_but_no_business_data(client):
+    email, pw = "hq2@cadence.example", "hq-password-2026!"
+    _make_hq_admin(email, pw)
+    hq = _bearer(client.post("/api/v1/hq/auth/login", json={"email": email, "password": pw}))
+    rows = client.get("/api/v1/hq/pharmacies", headers=hq).json()
+    names = {r["name"] for r in rows}
+    assert {"Harbour View Pharmacy", "Osu Community Pharmacy"} <= names
+    hv = next(r for r in rows if r["name"] == "Harbour View Pharmacy")
+    assert hv["loginsMonth"] > 0 and hv["activeUsersWeek"] > 0 and hv["health"] == "active"
+    assert hv["featuresMonth"]["ai_question"] >= 1
+    # Nothing about stock, money or alert recipients anywhere in the HQ payloads
+    detail = client.get(f"/api/v1/hq/pharmacies/{hv['id']}", headers=hq)
+    blob = (str(rows) + detail.text).lower()
+    for forbidden in ("coartem", "amoxicillin", "unitcost", "unitprice", "revenue", "₵", "+233 24 555 0142", "alerts@harbourview"):
+        assert forbidden not in blob, forbidden
+    assert len(detail.json()["activityMonth"]) == 30
+    ov = client.get("/api/v1/hq/overview", headers=hq).json()
+    assert ov["pharmacies"] >= 2 and ov["urgentOpen"] >= 0
+
+
+def test_hq_and_pharmacy_logins_are_separate(client):
+    h = login(client, "abena@harbourview.example")
+    assert client.get("/api/v1/hq/pharmacies", headers=h).status_code == 401  # a pharmacy admin can't open HQ
+    hq = _bearer(client.post("/api/v1/hq/auth/login", json={"email": "hq@cadence.example", "password": "hq-password-2026!"}))
+    assert client.get("/api/v1/items", headers=hq).status_code == 401  # HQ can't open a pharmacy's stock
+    assert client.post("/api/v1/hq/auth/login", json={"email": "abena@harbourview.example", "password": "cadence2026"}).status_code == 401

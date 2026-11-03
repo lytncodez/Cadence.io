@@ -17,6 +17,8 @@ from ..models import Batch, Product, User
 from ..schemas import ImportResult, ImportRowError, ItemCreate, ItemOut, ItemUpdate, ParseResult
 from ..serializers import item_out, sold_this_month
 
+from ..services import usage
+
 router = APIRouter(prefix="/items", tags=["items"])
 
 
@@ -69,6 +71,7 @@ async def create_item(body: ItemCreate, user: User = Depends(require("edit_inven
             raise HTTPException(status.HTTP_409_CONFLICT, f"Batch {body.batch} already exists for this barcode. Edit that row instead.")
     batch = Batch(product_id=product.id, batch_no=body.batch, expiry_date=body.expiry, qty=body.qty)
     db.add(batch)
+    usage.record(db, user.pharmacy_id, "item_added", user.id)
     await db.commit()
     await db.refresh(batch, ["product"])
     return item_out(batch, finance=await can_see_finance(db, user))
@@ -230,5 +233,6 @@ async def import_items(
                 added += 1
             else:
                 updated += 1
+        usage.record(db, user.pharmacy_id, "import", user.id, added + updated)
         await db.commit()
     return ImportResult(dry_run=dry_run, total=total, added=added, updated=updated, errors=errors[:200], preview=good[:20])

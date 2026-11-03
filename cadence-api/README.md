@@ -127,6 +127,21 @@ Render's free plan sleeps, so use a free scheduler:
 2. Advanced → header `X-Cron-Secret` = the `CRON_SECRET` value from Render.
 Each pharmacy gets one digest a day after its "Send at" time (Ghana time).
 
+## Cadence HQ (for you, not for pharmacies)
+`<your site>/hq` is a separate console with its own logins (table `platform_admins`, tokens scoped to HQ). Pharmacy logins can't open it, and HQ logins can't open any pharmacy's stock.
+- **What HQ sees:** each pharmacy's name, town, join date and admin contact; how many people use it and on how many days; last activity; counts of logins, AI questions, batches added, rows imported and invites; whether SMS/email alerts are on; and its help requests. Health labels: Active (used in the last 3 days), Quiet (3-14 days), At risk (14+ days), New, Never used.
+- **What HQ never sees:** stock, batches, prices, costs, sales, margins, the text of AI questions, alert phone numbers or emails, or patients. Usage is stored as `usage_events` rows holding only kind, count and time.
+- **Get help (distress button):** every pharmacy user has a **Get help** button. Requests appear in HQ > Help requests, are emailed to `HQ_NOTIFY_EMAIL`, and urgent ones are also texted to `HQ_NOTIFY_SMS`. Your reply shows in the pharmacy's app and is emailed to the person who asked. HQ also lists website demo requests.
+- **Create your HQ login** (once, from your computer with `.env` pointing at Neon): `python -m app.create_hq_admin`. Run it again with the same email to change the password.
+
+| Method | Path | Who |
+|---|---|---|
+| POST | `/support/tickets` · GET `/support/tickets` | any pharmacy user · raise / see your pharmacy's requests |
+| POST | `/hq/auth/login` · GET `/hq/me` | HQ |
+| GET | `/hq/overview` · `/hq/pharmacies` · `/hq/pharmacies/{id}` | HQ · usage only |
+| GET/PATCH | `/hq/tickets` · `/hq/tickets/{id}` | HQ · help requests, reply and status |
+| GET/PATCH | `/hq/leads` · `/hq/leads/{id}` | HQ · website demo requests |
+
 ## Several pharmacies
 Every table row belongs to one pharmacy, and every query filters by the signed-in user's `pharmacy_id`. Asking for another pharmacy's batch, user or settings returns 404, as if it didn't exist; the tests check this for every endpoint. Each pharmacy has its own roles, alert settings, team and AI context. Emails are unique across Cadence: one login per person.
 
@@ -141,7 +156,7 @@ Every table row belongs to one pharmacy, and every query filters by the signed-i
 - **Role-based data:** people without `view_finance` (dispensers by default) never receive cost prices, margins, revenue or stock values from the API; they still see selling prices, which they need at the counter.
 
 ## Database migrations
-`alembic upgrade head` runs on every deploy (see the Dockerfile). Version `0002` adds `notification_settings`, `alert_reads` and `notification_log`. Version `0003` adds `password_resets`, `demo_requests` and `users.password_changed_at`. Version `0004` widens personal-data columns for encryption.
+`alembic upgrade head` runs on every deploy (see the Dockerfile). Version `0002` adds `notification_settings`, `alert_reads` and `notification_log`. Version `0003` adds `password_resets`, `demo_requests` and `users.password_changed_at`. Version `0004` widens personal-data columns for encryption. Version `0005` adds `platform_admins`, `usage_events`, `support_tickets` and `users.last_seen_at` for Cadence HQ.
 
 ## Next
 Staff invites by email, purchase orders, multi-branch stock transfers.

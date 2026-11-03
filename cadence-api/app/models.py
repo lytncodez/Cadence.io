@@ -65,6 +65,7 @@ class User(Base):
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set when a password is reset; sign-in tokens issued before this stop working.
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # for HQ activity stats
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -169,3 +170,42 @@ class DemoRequest(Base):
     status: Mapped[str] = mapped_column(String(20), default="new")  # new | contacted | booked | closed
     notified: Mapped[str] = mapped_column(String(200), default="")  # e.g. "email:sent sms:mock"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+# ---------- Cadence HQ (the people who run Cadence; separate from every pharmacy) ----------
+class PlatformAdmin(Base):
+    """A Cadence team member who signs in to HQ. Not a pharmacy user and can't open any pharmacy's data."""
+    __tablename__ = "platform_admins"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class UsageEvent(Base):
+    """That something happened, never what: kind + count + time. No stock, prices, names or messages."""
+    __tablename__ = "usage_events"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    pharmacy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pharmacies.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(30))  # signup | login | active | ai_question | import | item_added | invite | help_request
+    n: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class SupportTicket(Base):
+    """A "Get help" request from a pharmacy. The pharmacy writes the message, so it's what they chose to share."""
+    __tablename__ = "support_tickets"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    pharmacy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pharmacies.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    category: Mapped[str] = mapped_column(String(40))
+    urgency: Mapped[str] = mapped_column(String(10), default="normal")  # normal | urgent
+    message: Mapped[str] = mapped_column(EncryptedText, default="")
+    phone: Mapped[str] = mapped_column(EncryptedText, default="")  # callback number, encrypted at rest
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open | acknowledged | resolved
+    reply: Mapped[str] = mapped_column(Text, default="")  # HQ's reply, shown to the pharmacy
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

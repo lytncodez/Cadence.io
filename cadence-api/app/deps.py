@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_db
-from .models import Role, User
+from .models import PlatformAdmin, Role, User
+from .services import usage
 from .security import decode_token, password_version
 
 bearer = HTTPBearer(auto_error=False)
@@ -23,6 +24,8 @@ async def current_user(
         raise unauthorised
     try:
         payload = decode_token(creds.credentials)
+        if payload.get("scope") == "hq":  # an HQ token can't act as a pharmacy user
+            raise unauthorised
         user_id = uuid.UUID(payload["sub"])
     except (jwt.PyJWTError, KeyError, ValueError):
         raise unauthorised
@@ -32,7 +35,28 @@ async def current_user(
     # A password reset signs out every device that was logged in before it.
     if payload.get("pv", 0) != password_version(user.password_changed_at):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your password was changed. Log in again.", headers={"WWW-Authenticate": "Bearer"})
+    await usage.touch(db, user)
     return user
+
+
+async def current_hq_admin(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+) -> PlatformAdmin:
+    """Cadence HQ only. Pharmacy tokens are refused here, and HQ tokens are refused everywhere else."""
+    unauthorised = HTTPException(status.HTTP_401_UNAUTHORIZED, "Log in to Cadence HQ.", headers={"WWW-Authenticate": "Bearer"})
+    if not creds:
+        raise unauthorised
+    try:
+        payload = decode_token(creds.credentials)
+        if payload.get("scope") != "hq":
+            raise unauthorised
+        admin = await db.get(PlatformAdmin, uuid.UUID(payload["sub"]))
+    except (jwt.PyJWTError, KeyError, ValueError):
+        raise unauthorised
+    if not admin:
+        raise unauthorised
+    return admin
 
 
 async def user_perms(db: AsyncSession, user: User) -> set[str]:

@@ -12,7 +12,7 @@ from ..config import get_settings
 from ..models import Pharmacy
 from ..schemas import ForgotPasswordIn, LoginIn, LoginOut, PasswordChange, ResetCheckOut, ResetPasswordIn, SignupIn, UserOut
 from ..security import create_token, hash_password, password_version, verify_password
-from ..services import resets
+from ..services import resets, usage
 from ..services.notify import send_email
 from ..services.tenancy import create_pharmacy
 from ..serializers import user_out
@@ -39,7 +39,8 @@ async def login(body: LoginIn, request: Request, db: AsyncSession = Depends(get_
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account is suspended. Ask your pharmacy admin.")
     if user.status != "Active":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account hasn't been activated yet. Use the link in your invite email, or ask your admin to resend it.")
-    user.last_login = datetime.now(timezone.utc)
+    user.last_login = user.last_seen_at = datetime.now(timezone.utc)
+    usage.record(db, user.pharmacy_id, "login", user.id)
     await db.commit()
     return _session(user)
 
@@ -58,7 +59,8 @@ async def signup(body: SignupIn, request: Request, db: AsyncSession = Depends(ge
         raise HTTPException(409, "That email already has a Cadence account. Log in, or use \"Forgot password\".")
     ph, admin = await create_pharmacy(db, name=body.pharmacy_name, location=body.location, licence_no=body.licence_no,
                                       admin_name=body.name, email=email, password=body.password, position=body.position, phone=body.phone)
-    admin.last_login = datetime.now(timezone.utc)
+    admin.last_login = admin.last_seen_at = datetime.now(timezone.utc)
+    usage.record(db, ph.id, "signup", admin.id)
     await db.commit()
     if s.demo_notify_email:  # let the Cadence team know a pharmacy joined (best effort)
         await send_email(s.demo_notify_email, f"New pharmacy on Cadence: {ph.name}",

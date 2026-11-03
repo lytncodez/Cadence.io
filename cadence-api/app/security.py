@@ -36,5 +36,12 @@ def create_token(user_id: str, pharmacy_id: str, pv: int = 0) -> str:
     return jwt.encode({"sub": user_id, "ph": pharmacy_id, "pv": pv, "exp": exp}, s.jwt_secret, algorithm=ALGORITHM)
 
 
+def create_hq_token(admin_id: str) -> str:
+    """HQ sessions are separate from pharmacy sessions (scope "hq") and last 8 hours."""
+    s = get_settings()
+    exp = datetime.now(timezone.utc) + timedelta(hours=8)
+    return jwt.encode({"sub": admin_id, "scope": "hq", "exp": exp}, s.jwt_secret, algorithm=ALGORITHM)
+
+
 def decode_token(token: str) -> dict:
     return jwt.decode(token, get_settings().jwt_secret, algorithms=[ALGORITHM])

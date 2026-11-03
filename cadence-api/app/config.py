@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Public address of the web app, used in password-reset links (no trailing slash).
     app_url: str = "http://localhost:5173"
     reset_link_minutes: int = 60
+    # Cadence HQ: where "Get help" requests from pharmacies are sent (falls back to DEMO_NOTIFY_EMAIL / DEMO_NOTIFY_SMS).
+    hq_notify_email: str = ""
+    hq_notify_sms: str = ""
+
     # Let pharmacies create their own account from the website. Set to false to only add pharmacies yourself.
     signup_enabled: bool = True
 

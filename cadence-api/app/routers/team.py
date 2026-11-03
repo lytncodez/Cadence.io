@@ -11,7 +11,7 @@ from ..models import Pharmacy, Role, User
 from ..schemas import InviteIn, InviteOut, PharmacyOut, PharmacyUpdate, ResetLinkOut, RoleOut, UserOut, UserUpdate
 from ..security import hash_password
 from ..serializers import user_out
-from ..services import resets
+from ..services import resets, usage
 
 router = APIRouter(tags=["team"])
 ADMIN_FIELDS = {"position", "department", "role", "status"}
@@ -119,6 +119,7 @@ async def invite_user(body: InviteIn, me: User = Depends(require("manage_users")
     await db.flush()
     token = await resets.issue(db, user, "admin")
     status_, error = await resets.email_link(db, user, token, by_admin=me.name)
+    usage.record(db, me.pharmacy_id, "invite", me.id)
     await db.commit()
     await db.refresh(user)
     return InviteOut(user=user_out(user), delivery=ResetLinkOut(
