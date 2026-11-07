@@ -45,7 +45,7 @@ async def integrations(user: User = Depends(require("manage_alerts", "company"))
                 "Built-in wording for stock questions; general questions are off. Set AI_PROVIDER and its API key (AI_MODEL is optional)."),
         digest=Integration(provider="cron", status="live" if s.cron_secret else "needs_setup",
                            detail="The daily digest runs when your scheduler calls /alerts/cron." if s.cron_secret
-                           else "Set CRON_SECRET and add a cron-job.org job that calls POST /api/v1/alerts/cron every 15 minutes."),
+                           else "Set CRON_SECRET on Render, then add a cron-job.org job every 15 minutes for <this API address>/api/v1/alerts/cron?secret=<your CRON_SECRET>."),
         encryption=Integration(provider="fernet", status="live" if crypto.enabled() else "needs_setup",
                                detail="Personal details are encrypted in the database." if crypto.enabled()
                                else "Set DATA_ENCRYPTION_KEY to encrypt personal details at rest."),

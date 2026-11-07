@@ -1,7 +1,7 @@
 /* Alerts, notifications, AI insights, import and pharmacy settings.
    Mock mode mirrors the API's rules (cadence-api/app/services/*) so both behave the same. */
 import { z } from "zod";
-import { api, currentPerms, delay, getState, http, set, USE_MOCK, V, type Pharmacy } from "./api";
+import { API_URL, api, currentPerms, delay, getState, http, set, USE_MOCK, V, type Pharmacy } from "./api";
 import { summarize, type Summary } from "./analytics";
 import { daysUntil, fmtDate, money, storage } from "./utils";
 import type { Item, Status } from "./types";
@@ -108,6 +108,22 @@ export const alerts = {
     if (!ns.email) throw new Error("Add an email address and save before sending a test.");
     logMock({ channel: "email", recipient: ns.email, subject: "Cadence test email", message: "Email alerts from Cadence are working.", kind: "test" });
     return { channel: "email", status: "mock", detail: "Logged only: demo mode doesn't send real email." };
+  },
+  /** Today's daily report as a PDF, made by the server: opens it in a new tab, or downloads it. */
+  async reportPdf(download = false): Promise<void> {
+    if (USE_MOCK) throw new Error("The PDF report is made by the Cadence server, so it works once the app is connected to the API (VITE_USE_MOCK=false). Demo mode can't make it.");
+    if (!API_URL) throw new Error("VITE_API_URL isn't set, so the app doesn't know where the Cadence API is.");
+    const tab = download ? null : window.open("", "_blank"); // open inside the click so pop-up blockers allow it
+    const token = getState().session?.token;
+    let res: Response;
+    try { res = await fetch(`${API_URL}/alerts/report.pdf${download ? "?download=true" : ""}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }); }
+    catch { tab?.close(); throw new Error(`Can't reach the Cadence API at ${API_URL}.`); }
+    if (!res.ok) { tab?.close(); let d = res.statusText; try { d = (await res.json()).detail || d; } catch { /* not JSON */ } throw new Error(d || `Couldn't make the PDF (${res.status})`); }
+    const url = URL.createObjectURL(await res.blob());
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "")?.[1] || "cadence-report.pdf";
+    if (tab) tab.location.href = url;
+    else { const link = document.createElement("a"); link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   },
   async sendDigest(): Promise<SendResult[]> {
     if (!USE_MOCK) return http("POST", "/alerts/send-digest");

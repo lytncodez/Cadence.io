@@ -61,7 +61,7 @@ async def system(admin: PlatformAdmin = Depends(current_hq_admin)):
                 "Built-in wording only. Set AI_PROVIDER=anthropic and ANTHROPIC_API_KEY (AI_MODEL is optional)."),
         cron=Integration(provider="cron", status="live" if s.cron_secret else "needs_setup",
                          detail="Digests, weekly reports and the HQ email go out when your scheduler calls /alerts/cron." if s.cron_secret
-                         else "Set CRON_SECRET and add a cron-job.org job that calls POST /api/v1/alerts/cron every 15 minutes."),
+                         else "Set CRON_SECRET on Render, then add a cron-job.org job every 15 minutes for <this API address>/api/v1/alerts/cron?secret=<your CRON_SECRET>."),
         encryption=Integration(provider="fernet", status="live" if crypto.enabled() else "needs_setup",
                                detail="Personal details are encrypted in the database." if crypto.enabled() else "Set DATA_ENCRYPTION_KEY."),
         hq_email=Integration(provider="email", status="live" if hq_email else "needs_setup",

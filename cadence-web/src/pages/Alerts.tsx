@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LuCheck, LuCheckCheck, LuMessageSquare, LuMail, LuSend, LuBan, LuTriangleAlert, LuClock, LuLayers, LuArrowRight, LuTrash2, LuInfo, LuCircleAlert, LuCircleCheck, LuSparkles, LuUsers } from "react-icons/lu";
+import { LuCheck, LuCheckCheck, LuMessageSquare, LuMail, LuSend, LuBan, LuTriangleAlert, LuClock, LuLayers, LuArrowRight, LuTrash2, LuInfo, LuCircleAlert, LuCircleCheck, LuSparkles, LuUsers, LuFileText, LuDownload } from "react-icons/lu";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Input, Skeleton, StatusPill, Toggle } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/overlay";
@@ -58,6 +58,12 @@ export default function Alerts() {
     } catch (e) { toast({ message: (e as Error).message, tone: "error" }); }
     finally { setBusy(null); }
   }
+  async function pdf(download: boolean) {
+    setBusy(download ? "pdfdl" : "pdf");
+    try { await alertsApi.reportPdf(download); }
+    catch (e) { toast({ message: (e as Error).message, tone: "error" }); }
+    finally { setBusy(null); }
+  }
   async function save() {
     if (!ns) return;
     setBusy("save");
@@ -75,6 +81,8 @@ export default function Alerts() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button disabled={!counts.unread} onClick={() => markRead((list ?? []).filter((a) => !a.read).map((a) => a.key))}><LuCheckCheck />Mark all read</Button>
+          <Button loading={busy === "pdf"} onClick={() => pdf(false)} title="Today's full report as a PDF to read or print"><LuFileText />Daily report PDF</Button>
+          <Button variant="ghost" loading={busy === "pdfdl"} onClick={() => pdf(true)} aria-label="Download the daily report PDF" title="Download PDF"><LuDownload /></Button>
           {manage && <Button variant="primary" loading={busy === "digest"} onClick={() => run("digest", alertsApi.sendDigest)}><LuSend />Send digest now</Button>}
         </div>
       </div>

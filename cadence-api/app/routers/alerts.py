@@ -2,7 +2,7 @@ import hmac
 import logging
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,7 @@ from ..db import get_db
 from ..deps import can_see_finance, current_user, require
 from ..models import AlertRead, NotificationLog, NotificationSettings, Pharmacy, User
 from ..schemas import AlertOut, DeliveryOut, NotifySettingsIO, SendResult
-from ..services import notify, reports
+from ..services import digest_pdf, notify, reports
 from ..services.analytics import summarize
 
 log = logging.getLogger("cadence.alerts")
@@ -140,10 +140,14 @@ async def _digest(db: AsyncSession, user: User, force: bool) -> list[SendResult]
             results.append(r)
     if ns.email_enabled and email_to:
         note = await reports.priorities(s) if any(r.finance for r in email_to) else ""
+        ph = await db.get(Pharmacy, user.pharmacy_id)
+        pdfs: dict[bool, bytes] = {}  # one PDF with money, one without, shared by everyone in each group
         out = []
         for rcp in email_to:
-            subject, body = notify.email_body(s, notify.compute_alerts(s, ns, rcp.finance), rcp.finance, note if rcp.finance else "")
-            st, err = await notify.send_email(rcp.address, subject, body)
+            subject, body = notify.email_body(s, notify.compute_alerts(s, ns, rcp.finance), rcp.finance, pdf=True)
+            if rcp.finance not in pdfs:
+                pdfs[rcp.finance] = digest_pdf.build_pdf(s, _pdf_context(ph, rcp.finance, note if rcp.finance else ""))
+            st, err = await notify.send_email(rcp.address, subject, body, [(digest_pdf.filename(s.pharmacy), pdfs[rcp.finance], "application/pdf")])
             await notify.log(db, user.pharmacy_id, "email", rcp.address, body, st, err, "digest", subject)
             out.append((st, err))
         if r := _merge("email", out):
@@ -151,6 +155,22 @@ async def _digest(db: AsyncSession, user: User, force: bool) -> list[SendResult]
     ns.last_digest_on = today
     await db.commit()
     return results
+
+
+def _pdf_context(ph: Pharmacy | None, finance: bool, note: str, name: str = "") -> digest_pdf.DigestContext:
+    return digest_pdf.DigestContext(location=getattr(ph, "location", "") or "", licence_no=getattr(ph, "licence_no", "") or "",
+                                    finance=finance, ai_note=note, recipient=name)
+
+
+@router.get("/report.pdf")
+async def report_pdf(download: bool = False, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    """Today's daily report as a printable PDF (the same one the digest email carries). No money for non-finance roles."""
+    s = await summarize(db, user)
+    finance = await can_see_finance(db, user)
+    note = await reports.priorities(s) if finance else ""
+    pdf = digest_pdf.build_pdf(s, _pdf_context(await db.get(Pharmacy, user.pharmacy_id), finance, note, user.name))
+    disp = "attachment" if download else "inline"
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'{disp}; filename="{digest_pdf.filename(s.pharmacy)}"'})
 
 
 async def _weekly(db: AsyncSession, user: User, force: bool) -> list[SendResult]:
@@ -192,13 +212,20 @@ async def send_weekly_now(user: User = Depends(require("manage_alerts")), db: As
     return await _weekly(db, user, force=True)
 
 
-@router.post("/cron", response_model=dict)
-async def cron(x_cron_secret: str = Header(default=""), db: AsyncSession = Depends(get_db)):
-    """Call every 15 minutes from cron-job.org with header X-Cron-Secret. Sends each pharmacy's digest once a day
-    after its digest time (Ghana time = UTC)."""
-    secret = get_settings().cron_secret
-    if not secret or not hmac.compare_digest(x_cron_secret.encode(), secret.encode()):
-        raise HTTPException(403, "Bad or missing X-Cron-Secret.")
+@router.api_route("/cron", methods=["GET", "POST"], response_model=dict)
+async def cron(request: Request, x_cron_secret: str = Header(default=""), secret: str = "", db: AsyncSession = Depends(get_db)):
+    """Call every 15 minutes from cron-job.org. Sends each pharmacy's digest once a day after its digest time
+    (Ghana time = UTC). The secret can come as the X-Cron-Secret header, as "Authorization: Bearer <secret>", or in the
+    address as ?secret=<secret> (simplest to set up in cron-job.org). GET and POST both work."""
+    expected = get_settings().cron_secret
+    if not expected:
+        raise HTTPException(403, "CRON_SECRET isn't set on the server. Add it under Environment on the cadence-api service in Render, then redeploy.")
+    auth = request.headers.get("authorization", "")
+    given = (x_cron_secret or secret or (auth[7:] if auth.lower().startswith("bearer ") else "")).strip()
+    if not given:
+        raise HTTPException(403, "No secret was sent. Add ?secret=YOUR_CRON_SECRET to the end of the address in cron-job.org.")
+    if not hmac.compare_digest(given.encode(), expected.encode()):
+        raise HTTPException(403, "The secret doesn't match CRON_SECRET on the server. Copy and paste it again (no spaces).")
     now = datetime.now(timezone.utc).strftime("%H:%M")
     sent = weekly = 0
     # Loop over plain ids: a rollback after one pharmacy's failure expires loaded objects, which then can't reload here.

@@ -3,6 +3,7 @@
 SMS_PROVIDER=mock and EMAIL_PROVIDER=mock (defaults) record messages in notification_log without sending,
 so the whole flow can be tested before any accounts are set up."""
 import asyncio
+import base64
 import re
 import smtplib
 import uuid
@@ -63,8 +64,24 @@ def sms_text(s: Summary, ns: NotificationSettings, finance: bool = True) -> str:
     return gsm7(" ".join([head] + mid + tail))[:SMS_ONE]
 
 
-def email_body(s: Summary, alerts: list[dict], finance: bool = True, ai_note: str = "") -> tuple[str, str]:
-    subject = f"Cadence daily digest · {s.counts['critical']} critical, {s.counts['expired']} expired"
+def email_body(s: Summary, alerts: list[dict], finance: bool = True, ai_note: str = "", pdf: bool = False) -> tuple[str, str]:
+    """The digest email. With pdf=True (the daily digest) the full report is the attached PDF, and the email itself is
+    a short cover note."""
+    subject = f"Cadence daily report · {s.pharmacy} · {s.counts['critical']} critical, {s.counts['expired']} expired"
+    if pdf:
+        exp, crit = s.counts["expired"], s.counts["critical"]
+        lines = [f"Good morning from Cadence.", "",
+                 f"Today's full report for {s.pharmacy} is attached as a PDF. Download it, open it on your phone, or print it for the dispensary.", "",
+                 "At a glance:",
+                 f"- {exp} expired batch{'es' if exp != 1 else ''} to pull from the shelves",
+                 f"- {crit} critical batch{'es' if crit != 1 else ''} to dispense first",
+                 f"- {s.counts['soon']} expiring soon",
+                 f"- {len(s.low_stock)} product{'s' if len(s.low_stock) != 1 else ''} below the reorder level"]
+        if finance:
+            lines.append(f"- Usable stock value: {money(s.stock_value)}")
+        lines += ["", "The PDF lists every batch with tick boxes, what to reorder, and what to do with expired medicines "
+                  "(including Ghana FDA's disposal rules).", "", "Open Cadence to act on these."]
+        return subject, "\n".join(lines)
     lines = [f"Good morning from Cadence. Here's {s.pharmacy} today.", ""]
     if ai_note:
         lines += ["TODAY'S PRIORITIES (Cadence AI)", ai_note, ""]
@@ -229,12 +246,18 @@ def _sender() -> str:
     return s.email_from or s.smtp_from or s.smtp_user
 
 
-def _smtp_send(to: str, subject: str, body: str) -> None:
+Attachment = tuple[str, bytes, str]  # (filename, content, mime type)
+
+
+def _smtp_send(to: str, subject: str, body: str, attachments: list[Attachment] | None = None) -> None:
     s = get_settings()
     msg = EmailMessage()
     msg["From"] = f"{s.email_from_name} <{_sender()}>"
     msg["To"], msg["Subject"] = to, subject
     msg.set_content(body)
+    for name, data, mime in attachments or []:
+        main, _, sub = mime.partition("/")
+        msg.add_attachment(data, maintype=main, subtype=sub or "octet-stream", filename=name)
     if s.smtp_port == 465:  # implicit TLS
         with smtplib.SMTP_SSL(s.smtp_host, s.smtp_port, timeout=20) as server:
             if s.smtp_user:
@@ -267,7 +290,7 @@ def email_problem() -> str:
     return ""
 
 
-async def send_email(to: str, subject: str, body: str) -> tuple[str, str]:
+async def send_email(to: str, subject: str, body: str, attachments: list[Attachment] | None = None) -> tuple[str, str]:
     """Returns (status, error). status: sent | mock | failed."""
     s = get_settings()
     if s.email_provider == "mock":
@@ -276,17 +299,19 @@ async def send_email(to: str, subject: str, body: str) -> tuple[str, str]:
         return "failed", problem
     try:
         if s.email_provider == "smtp":
-            await asyncio.to_thread(_smtp_send, to, subject, body)
+            await asyncio.to_thread(_smtp_send, to, subject, body, attachments)
             return "sent", ""
         async with httpx.AsyncClient(timeout=20) as c:
             if s.email_provider == "brevo":
                 r = await c.post("https://api.brevo.com/v3/smtp/email",
                                  headers={"api-key": s.brevo_api_key, "accept": "application/json"},
                                  json={"sender": {"name": s.email_from_name, "email": _sender()}, "to": [{"email": to}],
-                                       "subject": subject, "textContent": body})
+                                       "subject": subject, "textContent": body,
+                                       **({"attachment": [{"name": n, "content": base64.b64encode(d).decode()} for n, d, _ in attachments]} if attachments else {})})
             else:  # resend
                 r = await c.post("https://api.resend.com/emails", headers={"Authorization": f"Bearer {s.resend_api_key}"},
-                                 json={"from": f"{s.email_from_name} <{_sender()}>", "to": [to], "subject": subject, "text": body})
+                                 json={"from": f"{s.email_from_name} <{_sender()}>", "to": [to], "subject": subject, "text": body,
+                                       **({"attachments": [{"filename": n, "content": base64.b64encode(d).decode()} for n, d, _ in attachments]} if attachments else {})})
             r.raise_for_status()
         return "sent", ""
     except httpx.HTTPStatusError as e:

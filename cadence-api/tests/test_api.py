@@ -678,3 +678,38 @@ def test_hq_can_delete_a_pharmacy_after_typing_its_name(client):
     gone = client.post("/api/v1/auth/login", json={"email": osu["adminEmail"], "password": "cadence2026"})
     assert gone.status_code in (400, 401)
     assert client.get("/api/v1/hq/pharmacies", headers=hq).status_code == 200  # everyone else is fine
+
+
+def test_daily_report_pdf_download_email_attachment_and_cron_by_address(client, monkeypatch):
+    from app.config import get_settings
+    from app.routers import alerts as alerts_router
+    a = login(client, "abena@harbourview.example")
+    r = client.get("/api/v1/alerts/report.pdf", headers=a)
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf" and r.content[:4] == b"%PDF"
+    assert "cadence-report-harbour-view-pharmacy-" in r.headers["content-disposition"]
+    assert client.get("/api/v1/alerts/report.pdf?download=true", headers=login(client, "efua@harbourview.example")).content[:4] == b"%PDF"
+    assert client.get("/api/v1/alerts/report.pdf").status_code == 401
+
+    sent = []
+
+    async def fake_email(to, subject, body, attachments=None):
+        sent.append((to, body, attachments))
+        return "mock", ""
+    monkeypatch.setattr(alerts_router.notify, "send_email", fake_email)
+    ns = client.get("/api/v1/alerts/settings", headers=a).json() | {"emailEnabled": True, "email": "owner@example.com"}
+    client.put("/api/v1/alerts/settings", json=ns, headers=a)
+    assert client.post("/api/v1/alerts/send-digest", headers=a).status_code == 200
+    to, body, att = next(x for x in sent if x[0] == "owner@example.com")
+    assert "attached as a PDF" in body
+    name, data, mime = att[0]
+    assert name.endswith(".pdf") and mime == "application/pdf" and data[:4] == b"%PDF"
+
+    # cron-job.org can pass the secret in the address, with GET or POST
+    monkeypatch.setattr(get_settings(), "cron_secret", "cron-test-secret")
+    assert client.get("/api/v1/alerts/cron?secret=cron-test-secret").status_code == 200
+    assert client.post("/api/v1/alerts/cron", headers={"Authorization": "Bearer cron-test-secret"}).status_code == 200
+    bad = client.get("/api/v1/alerts/cron?secret=nope")
+    assert bad.status_code == 403 and "doesn't match" in bad.json()["detail"]
+    assert "No secret" in client.get("/api/v1/alerts/cron").json()["detail"]
+    monkeypatch.setattr(get_settings(), "cron_secret", "")
+    assert "isn't set" in client.get("/api/v1/alerts/cron?secret=x").json()["detail"]

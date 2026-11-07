@@ -39,6 +39,7 @@ class Row:
     unit_price: float
     sold: int
     reorder_level: int
+    supplier: str = ""
 
     @property
     def value(self) -> float:
@@ -112,7 +113,7 @@ async def summarize(db: AsyncSession, user) -> Summary:
         p = b.product
         rows.append(Row(str(b.id), p.name, p.category, p.barcode, b.batch_no, b.expiry_date, days,
                         status_for(days, ph.critical_days, ph.soon_days), b.qty, float(p.unit_cost), float(p.unit_price),
-                        sold.get(b.id, 0), p.reorder_level))
+                        sold.get(b.id, 0), p.reorder_level, p.supplier or ""))
     counts = {s: 0 for s in STATUS_ORDER}
     value = {s: 0.0 for s in STATUS_ORDER}
     products: dict[str, ProductRollup] = {}
