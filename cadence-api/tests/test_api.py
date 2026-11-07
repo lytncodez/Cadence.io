@@ -31,7 +31,11 @@ def client():
 
 
 def login(client, email):
-    r = client.post("/api/v1/auth/login", json={"email": email, "password": "cadence2026"})
+    # Earlier tests change some passwords (password reset, change password), so try those too.
+    for pw in ("cadence2026", "brand-new-password-1", "a-much-longer-pass"):
+        r = client.post("/api/v1/auth/login", json={"email": email, "password": pw})
+        if r.status_code == 200:
+            break
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
@@ -111,6 +115,8 @@ def test_profile_rules(client):
     admin = login(client, "abena@harbourview.example")
     r = client.patch(f"/api/v1/users/{me['id']}", json={"role": "Pharmacist"}, headers=admin)
     assert r.status_code == 200 and r.json()["role"] == "Pharmacist"
+    # put Efua back as she was: later tests rely on her being a Dispenser with her seeded phone
+    client.patch(f"/api/v1/users/{me['id']}", json={"role": "Dispenser", "phone": "+233 27 555 0311"}, headers=admin)
 
 
 def test_monthly_analytics(client):
@@ -398,10 +404,12 @@ def _make_hq_admin(email="hq@cadence.example", password="hq-password-2026!"):
     import uuid as _uuid
     from app.security import hash_password
     con = sqlite3.connect("test_cadence.db")
-    con.execute("INSERT INTO platform_admins (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
-                (_uuid.uuid4().hex, email, "Miriam", hash_password(password)))
-    con.commit()
-    con.close()
+    try:  # always close, or a duplicate insert leaves the database locked for every later test
+        con.execute("INSERT INTO platform_admins (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+                    (_uuid.uuid4().hex, email, "Miriam", hash_password(password)))
+        con.commit()
+    finally:
+        con.close()
     return email, password
 
 
@@ -605,3 +613,68 @@ def test_africastalking_settings_and_send(monkeypatch):
     assert asyncio.run(notify.send_sms(notify.numbers("024 555 0142"), "Cadence test")) == ("sent", "")
     assert seen["url"] == "https://api.sandbox.africastalking.com/version1/messaging" and seen["key"] == "test-key"
     assert "to=%2B233245550142" in seen["body"] and "username=sandbox" in seen["body"] and "from=" not in seen["body"]
+
+
+def test_sms_is_one_plain_text_and_numbers_are_deduped():
+    from types import SimpleNamespace
+    from app.services import notify
+    assert notify.numbers("024 555 0142, +233 24 555 0142; +233 024 555 0142\n245550142") == ["233245550142"]
+    assert notify.gsm7("Cadence · ₵1,200 — “ok”…") == "Cadence - GHS 1,200 - \"ok\"..."
+    rows = [SimpleNamespace(status="critical", name=f"Amoxicillin {i}", batch=f"AMX-{i:04d}", days=i + 2, value=10.0) for i in range(9)]
+    rows += [SimpleNamespace(status="expired", name="Coartem", batch="CO-1", days=-3, value=1234.5)]
+    s = SimpleNamespace(rows=rows, pharmacy="Harbour View Pharmacy And Wellness Centre")
+    ns = SimpleNamespace(on_expired=True, on_critical=True)
+    for fin in (True, False):
+        text = notify.sms_text(s, ns, fin)
+        assert len(text) <= 160 and notify.gsm7(text) == text and "9 critical" in text and "1 expired" in text
+    assert "GHS" in notify.sms_text(s, ns, True) and "GHS" not in notify.sms_text(s, ns, False)
+
+
+def test_cron_never_sends_the_same_digest_twice(client, monkeypatch):
+    from app.config import get_settings
+    from app.routers import alerts as alerts_router
+    s = get_settings()
+    monkeypatch.setattr(s, "cron_secret", "cron-test-secret")
+    a = login(client, "abena@harbourview.example")
+    ns = client.get("/api/v1/alerts/settings", headers=a).json() | {"smsEnabled": True, "smsNumbers": "024 555 0142", "digestTime": "00:00"}
+    client.put("/api/v1/alerts/settings", json=ns, headers=a)
+    import sqlite3
+    con = sqlite3.connect("test_cadence.db")
+    try:  # pretend today's digest hasn't gone out yet
+        con.execute("UPDATE notification_settings SET last_digest_on = NULL")
+        con.commit()
+    finally:
+        con.close()
+    sent = []
+
+    async def boom_after_sms(to, message, max_len=459):
+        sent.append(message)
+        return "sent", ""
+
+    async def boom_email(*a, **k):
+        raise RuntimeError("email provider exploded after the SMS went out")
+    monkeypatch.setattr(alerts_router.notify, "send_sms", boom_after_sms)
+    monkeypatch.setattr(alerts_router.notify, "send_email", boom_email)
+    ns["emailEnabled"], ns["email"] = True, "owner@example.com"
+    client.put("/api/v1/alerts/settings", json=ns, headers=a)
+    counts = []
+    for _ in range(3):  # cron-job.org every 15 minutes, with a failure after the SMS each time
+        assert client.post("/api/v1/alerts/cron", headers={"X-Cron-Secret": "cron-test-secret"}).status_code == 200
+        counts.append(len([x for x in sent if "Harbour" in x]))
+    assert counts[0] >= 1 and counts == [counts[0]] * 3  # sent on the first run, never again that day
+    assert all(len(x) <= 160 for x in sent)
+
+
+def test_hq_can_delete_a_pharmacy_after_typing_its_name(client):
+    hq = _hq(client)
+    rows = client.get("/api/v1/hq/pharmacies", headers=hq).json()
+    osu = next(r for r in rows if "Osu" in r["name"])
+    url = f"/api/v1/hq/pharmacies/{osu['id']}/delete"
+    assert client.post(url, json={"confirmName": "wrong name"}, headers=hq).status_code == 400
+    assert client.post(url, json={"confirmName": osu["name"]}).status_code in (401, 403)  # HQ only
+    assert client.post(url, json={"confirmName": osu["name"].upper()}, headers=hq).status_code == 204
+    assert all(r["id"] != osu["id"] for r in client.get("/api/v1/hq/pharmacies", headers=hq).json())
+    assert client.get(f"/api/v1/hq/pharmacies/{osu['id']}", headers=hq).status_code == 404
+    gone = client.post("/api/v1/auth/login", json={"email": osu["adminEmail"], "password": "cadence2026"})
+    assert gone.status_code in (400, 401)
+    assert client.get("/api/v1/hq/pharmacies", headers=hq).status_code == 200  # everyone else is fine

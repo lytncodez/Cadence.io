@@ -41,8 +41,8 @@ async def integrations(user: User = Depends(require("manage_alerts", "company"))
         sms=_row(s.sms_provider, notify.sms_problem(), notify.sms_live_detail(), notify.SMS_DEMO_DETAIL),
         email=_row(s.email_provider, notify.email_problem(), f"Sending from {s.email_from or s.smtp_from or s.smtp_user} via {s.email_provider.title()}.",
                    "Demo mode: emails are logged, not sent. Set EMAIL_PROVIDER=brevo (or resend), its API key and EMAIL_FROM."),
-        ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {s.ai_model}. Answers general questions too.",
-                "Built-in wording for stock questions; general questions are off. Set AI_PROVIDER, its key and AI_MODEL."),
+        ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {ai.model_label()}. Answers general questions too.",
+                "Built-in wording for stock questions; general questions are off. Set AI_PROVIDER and its API key (AI_MODEL is optional)."),
         digest=Integration(provider="cron", status="live" if s.cron_secret else "needs_setup",
                            detail="The daily digest runs when your scheduler calls /alerts/cron." if s.cron_secret
                            else "Set CRON_SECRET and add a cron-job.org job that calls POST /api/v1/alerts/cron every 15 minutes."),

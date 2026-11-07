@@ -13,7 +13,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import get_settings
+from ..config import env_names_like, get_settings
 from ..models import HqDelivery, NotificationLog, NotificationSettings, Role, User
 from .analytics import Summary, money
 
@@ -40,17 +40,27 @@ def compute_alerts(s: Summary, ns: NotificationSettings, finance: bool = True) -
 
 
 def sms_text(s: Summary, ns: NotificationSettings, finance: bool = True) -> str:
+    """The daily alert as ONE plain text (160 GSM characters), so it arrives as a single SMS and is billed once."""
     exp = [r for r in s.rows if r.status == "expired"] if ns.on_expired else []
-    crit = [r for r in s.rows if r.status == "critical"] if ns.on_critical else []
+    crit = sorted((r for r in s.rows if r.status == "critical"), key=lambda r: r.days) if ns.on_critical else []
     if not exp and not crit:
         return ""
-    parts = [f"Cadence · {s.pharmacy}"]
-    if crit:
-        first = ", ".join(f"{r.name.split()[0]} {r.batch} ({r.days}d)" for r in crit[:3])
-        parts.append(f"{len(crit)} critical: {first}{' +more' if len(crit) > 3 else ''}.")
+    head = f"Cadence - {s.pharmacy}:"
+    tail = []
     if exp:
-        parts.append(f"{len(exp)} expired" + (f" ({money(sum(r.value for r in exp))})" if finance else "") + ". Quarantine today.")
-    return " ".join(parts)[:459]  # 3 SMS segments
+        tail.append(f"{len(exp)} expired" + (f" ({gsm_money(sum(r.value for r in exp))})" if finance else "") + ", quarantine today.")
+    tail.append("Details in Cadence.")
+    # List as many critical batches as fit, most urgent first.
+    for shown in range(min(3, len(crit)), -1, -1):
+        mid = []
+        if crit:
+            items = ", ".join(f"{r.name.split()[0]} {r.batch} {r.days}d" for r in crit[:shown])
+            more = len(crit) - shown
+            mid.append(f"{len(crit)} critical" + (f": {items}" if items else "") + (f" +{more} more" if shown and more else "") + ".")
+        text = gsm7(" ".join([head] + mid + tail))
+        if len(text) <= SMS_ONE:
+            return text
+    return gsm7(" ".join([head] + mid + tail))[:SMS_ONE]
 
 
 def email_body(s: Summary, alerts: list[dict], finance: bool = True, ai_note: str = "") -> tuple[str, str]:
@@ -106,21 +116,52 @@ async def recipients(db: AsyncSession, ns: NotificationSettings, pharmacy_id) ->
 
 
 def numbers(raw: str) -> list[str]:
-    """'+233 24 555 0142, 020 555 0198' -> ['233245550142', '233205550198']"""
+    """'+233 24 555 0142, 020 555 0198' -> ['233245550142', '233205550198']. Duplicates are dropped, so a number typed
+    twice (or as 024... and +23324...) gets one text."""
     out = []
-    for n in re.split(r"[,;\n]+", raw or ""):
+    for n in re.split(r"[,;\n/]+", raw or ""):
         d = re.sub(r"\D", "", n)
         if not d:
             continue
+        if d.startswith("00"):
+            d = d[2:]
         if d.startswith("0") and len(d) == 10:
             d = "233" + d[1:]
+        elif d.startswith("2330") and len(d) == 13:  # +233 024 ... typed with the leading 0
+            d = "233" + d[4:]
+        elif len(d) == 9 and not d.startswith("0"):
+            d = "233" + d
         out.append(d)
-    return out
+    return list(dict.fromkeys(out))
 
 
-async def send_sms(to: list[str], message: str) -> tuple[str, str]:
-    """Returns (status, error). status: sent | mock | failed."""
+# ---- SMS length: one SMS is 160 plain (GSM-7) characters. A single symbol outside that set (₵, ·, —, curly quotes,
+# emoji) switches the whole text to Unicode, where one SMS holds only 70, so a normal alert arrived as 3-7 separate texts.
+SMS_ONE, SMS_MAX = 160, 459  # 459 = 3 joined SMS (153 each)
+_GSM = set("@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà")
+_SWAP = {"₵": "GHS ", "·": "-", "•": "-", "—": "-", "–": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "×": "x", "→": "->",
+         "≤": "<=", "≥": ">=", "\u00a0": " ", "\t": " "}
+
+
+def gsm7(text: str) -> str:
+    """Make text plain SMS characters so it isn't billed as Unicode."""
+    out = "".join(_SWAP.get(ch, ch) for ch in text)
+    out = "".join(ch if ch in _GSM else "" for ch in out)
+    return re.sub(r" {2,}", " ", out).strip()
+
+
+def gsm_money(n: float) -> str:
+    return f"GHS {n:,.0f}" if abs(n) >= 100 else f"GHS {n:,.2f}"
+
+
+async def send_sms(to: list[str], message: str, max_len: int = SMS_MAX) -> tuple[str, str]:
+    """Returns (status, error). status: sent | mock | failed. The text is made plain-SMS safe and capped at max_len
+    (default 3 joined SMS), and each number gets it once."""
     s = get_settings()
+    message = gsm7(message)
+    if len(message) > max_len:
+        message = message[: max_len - 3].rstrip() + "..."
+    to = list(dict.fromkeys(to))
     if s.sms_provider == "mock":
         return "mock", ""
     if problem := sms_problem():
@@ -272,8 +313,13 @@ def sms_problem() -> str:
     if p == "mock":
         return ""
     if p == "africastalking":
-        if not s.africastalking_username.strip() or not s.africastalking_api_key:
-            return "Set AFRICASTALKING_USERNAME and AFRICASTALKING_API_KEY (Africa's Talking dashboard → Settings → API Key)."
+        missing = [n for n, v in (("AFRICASTALKING_USERNAME", s.africastalking_username), ("AFRICASTALKING_API_KEY", s.africastalking_api_key)) if not v]
+        if missing:
+            seen = env_names_like("AFRICA", "AT_")
+            return (f"The server can't see {' or '.join(missing)}. Add {'them' if len(missing) > 1 else 'it'} under Environment on the "
+                    "cadence-api service in Render (not the .env file on your computer), then save and redeploy. "
+                    "The username is your Africa's Talking app's username (or 'sandbox'); the key is under Settings → API Key. "
+                    + (f"Variables it can see: {', '.join(seen)}." if seen else "It can't see any Africa's Talking variables at all."))
         if len(s.sms_sender_id.strip()) > 11:
             return "SMS_SENDER_ID must be at most 11 characters (or blank to use Africa's Talking's default)."
         return ""

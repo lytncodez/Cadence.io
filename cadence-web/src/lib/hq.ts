@@ -60,6 +60,7 @@ function mockPharmacies(): HqPharmacy[] {
     ["Tamale Wellness Pharmacy", "Tamale", "Ibrahim Alhassan", 5, "active", 30],
     ["Ho Family Pharmacy", "Ho", "Selorm Agbeko", 1, "new", 2],
   ] as const;
+  const gone = storage.get<string[]>("hq.deleted", []);
   return seed.map(([name, location, admin, staff, health, ageDays], i) => {
     const lvl = health === "active" ? 1 : health === "quiet" ? 0.35 : health === "at_risk" ? 0.05 : 0.2;
     const days = Array.from({ length: 14 }, (_, d) => Math.max(0, Math.round((staff * 3 * lvl) * (0.6 + ((d * 7 + i * 3) % 10) / 10) * (d % 7 === 0 ? 0.4 : 1))));
@@ -75,7 +76,7 @@ function mockPharmacies(): HqPharmacy[] {
       health: health as Health, featuresMonth: { login: Math.round(staff * 22 * lvl), ai_question: Math.round(40 * lvl), import: i % 3, item_added: Math.round(60 * lvl), invite: i % 2, help_request: tickets.length },
       smsOn: i % 3 !== 2, emailOn: i % 2 === 0, openTickets: tickets.length, urgentOpen: tickets.filter((t) => t.urgency === "urgent").length, activityByDay: days,
     };
-  });
+  }).filter((p) => !gone.includes(p.id));
 }
 
 /* Demo-mode version of the server's template briefing (cadence-api/app/services/hq_ai.py). */
@@ -123,6 +124,15 @@ export const hq = {
       signupsByWeek: [0, 1, 0, 1, 1, 0, 1, 1], activePharmaciesByDay: Array.from({ length: 14 }, (_, i) => 3 + ((i * 5) % 3)) };
   },
   async pharmacies(): Promise<HqPharmacy[]> { if (!USE_MOCK) return http("GET", "/hq/pharmacies"); await delay(250); return mockPharmacies(); },
+  /** Permanently delete a pharmacy account and all its data. confirmName must match the pharmacy's name. */
+  async deletePharmacy(id: string, confirmName: string): Promise<void> {
+    if (!USE_MOCK) return http("POST", `/hq/pharmacies/${id}/delete`, { confirmName });
+    await delay(400);
+    const p = mockPharmacies().find((x) => x.id === id);
+    if (!p) throw new Error("No such pharmacy.");
+    if (confirmName.trim().toLowerCase() !== p.name.toLowerCase()) throw new Error(`Type the pharmacy's name exactly (${p.name}) to delete it.`);
+    storage.set("hq.deleted", [...storage.get<string[]>("hq.deleted", []), id]);
+  },
   async pharmacy(id: string): Promise<HqDetail> {
     if (!USE_MOCK) return http("GET", `/hq/pharmacies/${id}`);
     await delay(250);

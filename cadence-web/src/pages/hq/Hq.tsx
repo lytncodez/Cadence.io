@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LuLayoutDashboard, LuStore, LuLifeBuoy, LuInbox, LuLogOut, LuSiren, LuSearch, LuArrowRight, LuShieldCheck, LuUsers,
   LuActivity, LuSparkles, LuUpload, LuMessageSquare, LuMail, LuCircleCheck, LuEye, LuPhone, LuRefreshCw, LuCircleAlert,
-  LuMegaphone, LuServer,
+  LuMegaphone, LuServer, LuTrash2,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { Button, Card, CardHeader, EmptyState, Input, Logo } from "@/components/ui/primitives";
@@ -223,14 +223,23 @@ function Pharmacies() {
           </div>
         )}
       </Card>
-      <PharmacyDrawer id={open} onClose={() => setOpen(null)} />
+      <PharmacyDrawer id={open} onClose={() => setOpen(null)} onDeleted={(id) => { setList((l) => l?.filter((x) => x.id !== id) ?? null); setOpen(null); }} />
     </>
   );
 }
 
-function PharmacyDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
+function PharmacyDrawer({ id, onClose, onDeleted }: { id: string | null; onClose: () => void; onDeleted: (id: string) => void }) {
+  const toast = useToast();
   const [d, setD] = useState<HqDetail | null>(null);
-  useEffect(() => { setD(null); if (id) hq.pharmacy(id).then(setD, () => {}); }, [id]);
+  const [confirming, setConfirming] = useState(false), [typed, setTyped] = useState(""), [busy, setBusy] = useState(false), [delErr, setDelErr] = useState("");
+  useEffect(() => { setD(null); setConfirming(false); setTyped(""); setDelErr(""); if (id) hq.pharmacy(id).then(setD, () => {}); }, [id]);
+  async function remove() {
+    if (!id || !d) return;
+    setBusy(true); setDelErr("");
+    try { await hq.deletePharmacy(id, typed); toast({ message: `Deleted ${d.pharmacy.name} and all its data` }); onDeleted(id); }
+    catch (e) { setDelErr((e as Error).message); }
+    finally { setBusy(false); }
+  }
   const p = d?.pharmacy;
   const feat: [keyof HqPharmacy["featuresMonth"], string, IconType][] = [["login", "Logins", LuUsers], ["ai_question", "AI questions", LuSparkles], ["item_added", "Batches added", LuStore], ["import", "Rows imported", LuUpload], ["invite", "Invites sent", LuMail], ["help_request", "Help requests", LuLifeBuoy]];
   return (
@@ -262,6 +271,25 @@ function PharmacyDrawer({ id, onClose }: { id: string | null; onClose: () => voi
             {d!.tickets.length === 0 ? <p className="text-sm text-muted">None.</p> : d!.tickets.map((t) => <p key={t.id} className="mb-1.5 flex items-center gap-2 text-sm"><span className={cn("size-2 rounded-full", t.status === "resolved" ? "bg-safe" : t.urgency === "urgent" ? "bg-critical" : "bg-soon")} />{t.categoryLabel}<span className="ml-auto text-xs text-muted">{fmtStamp(t.createdAt)}</span></p>)}
           </div>
           <p className="flex items-start gap-2 rounded-xl bg-surface-2 p-3 text-xs text-muted"><LuShieldCheck className="mt-0.5 size-4 shrink-0 text-safe" />HQ only receives usage counts. This pharmacy's stock, sales, prices and alert recipients stay private to them.</p>
+          <div className="rounded-2xl border border-critical/40 p-4">
+            <p className="text-xs font-semibold tracking-wider text-critical-ink uppercase">Delete account</p>
+            {!confirming ? (
+              <>
+                <p className="mt-1 text-sm text-muted">Permanently removes {p.name}: its {p.staff} {p.staff === 1 ? "person" : "people"}, stock, sales, alerts and help requests. They won't be able to sign in again.</p>
+                <Button variant="ghost" className="mt-3 text-critical-ink" onClick={() => setConfirming(true)}><LuTrash2 />Delete this pharmacy…</Button>
+              </>
+            ) : (
+              <form className="mt-2 grid gap-2" onSubmit={(e) => { e.preventDefault(); remove(); }}>
+                <label className="text-sm" htmlFor="del-name">This can't be undone. Type <b>{p.name}</b> to confirm.</label>
+                <Input id="del-name" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={p.name} autoComplete="off" />
+                {delErr && <p role="alert" className="text-xs text-critical-ink">{delErr}</p>}
+                <div className="flex gap-2">
+                  <Button type="submit" className="bg-critical text-white hover:bg-critical/90" loading={busy} disabled={typed.trim().toLowerCase() !== p.name.trim().toLowerCase()}><LuTrash2 />Delete permanently</Button>
+                  <Button type="button" variant="ghost" onClick={() => { setConfirming(false); setTyped(""); setDelErr(""); }}>Cancel</Button>
+                </div>
+              </form>
+            )}
+          </div>
         </div>
       )}
     </Drawer>

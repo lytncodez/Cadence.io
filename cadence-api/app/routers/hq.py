@@ -8,13 +8,14 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import ratelimit
 from ..db import get_db
 from ..deps import current_hq_admin
-from ..models import DemoRequest, NotificationSettings, Pharmacy, PlatformAdmin, SupportTicket, UsageEvent, User
+from ..models import (AlertRead, Batch, DemoRequest, NotificationLog, NotificationSettings, PasswordReset, Pharmacy, PlatformAdmin, Product,
+                      Role, Sale, SupportTicket, UsageEvent, User)
 from ..schemas import CamelModel
 from ..security import create_hq_token, verify_password
 from ..services.notify import hq_log, numbers, send_email, send_sms
@@ -188,6 +189,46 @@ async def pharmacy_detail(pharmacy_id: str, admin: PlatformAdmin = Depends(curre
     t = (await db.execute(select(SupportTicket, User.name).outerjoin(User, User.id == SupportTicket.user_id)
                           .where(SupportTicket.pharmacy_id == pid).order_by(SupportTicket.created_at.desc()).limit(20))).all()
     return PharmacyDetail(pharmacy=rows[0], activity_month=series, roles=roles, tickets=[ticket_out(x, n or "") for x, n in t])
+
+
+class DeletePharmacy(CamelModel):
+    confirm_name: str = Field(max_length=200)
+
+
+@router.post("/pharmacies/{pharmacy_id}/delete", status_code=204)
+async def delete_pharmacy(pharmacy_id: str, body: DeletePharmacy, admin: PlatformAdmin = Depends(current_hq_admin), db: AsyncSession = Depends(get_db)):
+    """Permanently delete a pharmacy account and everything in it: team, stock, sales, alerts, help requests.
+    The caller must type the pharmacy's name exactly, so one mis-click can't wipe an account."""
+    try:
+        pid = uuid.UUID(pharmacy_id)
+    except ValueError:
+        raise HTTPException(404, "No such pharmacy.")
+    ph = await db.get(Pharmacy, pid)
+    if not ph:
+        raise HTTPException(404, "No such pharmacy.")
+    if body.confirm_name.strip().casefold() != ph.name.strip().casefold():
+        raise HTTPException(400, f"Type the pharmacy's name exactly ({ph.name}) to delete it.")
+    # Children first, so it works whether or not the database enforces ON DELETE CASCADE (SQLite doesn't by default).
+    users = select(User.id).where(User.pharmacy_id == pid)
+    products = select(Product.id).where(Product.pharmacy_id == pid)
+    for stmt in (
+        delete(AlertRead).where(AlertRead.user_id.in_(users)),
+        delete(PasswordReset).where(PasswordReset.user_id.in_(users)),
+        delete(Sale).where(Sale.pharmacy_id == pid),
+        delete(Batch).where(Batch.product_id.in_(products)),
+        delete(Product).where(Product.pharmacy_id == pid),
+        delete(NotificationLog).where(NotificationLog.pharmacy_id == pid),
+        delete(NotificationSettings).where(NotificationSettings.pharmacy_id == pid),
+        delete(UsageEvent).where(UsageEvent.pharmacy_id == pid),
+        delete(SupportTicket).where(SupportTicket.pharmacy_id == pid),
+        delete(User).where(User.pharmacy_id == pid),
+        delete(Role).where(Role.pharmacy_id == pid),
+        delete(Pharmacy).where(Pharmacy.id == pid),
+    ):
+        await db.execute(stmt)
+    hq_log(db, "system", admin.email, f"Deleted pharmacy {ph.name} ({ph.location or 'no location'}).", "sent", "", "account_deleted",
+           "Pharmacy deleted")
+    await db.commit()
 
 
 class Overview(CamelModel):

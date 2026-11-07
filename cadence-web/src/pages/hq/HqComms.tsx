@@ -272,7 +272,7 @@ export function SystemPage() {
     setBusy(key); setResult(null);
     try { const r = await fn(); setResult(r); setLog(await hq.deliveries()); } catch (e) { toast({ message: (e as Error).message, tone: "error" }); } finally { setBusy(""); }
   }
-  const rows: [keyof HqSystem, string][] = [["sms", "SMS (Arkesel / Hubtel)"], ["email", "Email (Brevo / Resend / SMTP)"], ["ai", "AI"], ["cron", "Scheduler (daily digests)"], ["hqEmail", "Your inbox"], ["hqSms", "Your phone"], ["hqDigest", "HQ daily email"], ["encryption", "Encryption"]];
+  const rows: [keyof HqSystem, string][] = [["sms", "SMS (Africa's Talking)"], ["email", "Email (Brevo / Resend / SMTP)"], ["ai", "AI"], ["cron", "Scheduler (daily digests)"], ["hqEmail", "Your inbox"], ["hqSms", "Your phone"], ["hqDigest", "HQ daily email"], ["encryption", "Encryption"]];
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[1fr_1fr]">
       <Card className="overflow-hidden">

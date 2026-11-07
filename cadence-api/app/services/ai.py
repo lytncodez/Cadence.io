@@ -10,7 +10,7 @@ import logging
 
 import httpx
 
-from ..config import get_settings
+from ..config import env_names_like, get_settings
 from .analytics import Summary, money
 
 log = logging.getLogger("cadence.ai")
@@ -130,25 +130,77 @@ def template(kind: str, f: dict) -> str:
             "what to reorder, or about a product such as Coartem.")
 
 
+_auto_model: dict[str, str] = {}
+
+
+async def model_id(client: httpx.AsyncClient | None = None) -> str:
+    """AI_MODEL if it's set; otherwise the newest suitable model on your account (asked once, then remembered)."""
+    s = get_settings()
+    if s.ai_model:
+        return s.ai_model
+    key = f"{s.ai_provider}:{(s.anthropic_api_key or s.openai_api_key)[-6:]}"
+    if key in _auto_model:
+        return _auto_model[key]
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=20)
+    try:
+        if s.ai_provider == "anthropic":
+            r = await client.get("https://api.anthropic.com/v1/models?limit=100",
+                                 headers={"x-api-key": s.anthropic_api_key, "anthropic-version": "2023-06-01"})
+            r.raise_for_status()
+            ids = [m["id"] for m in r.json().get("data", [])]  # newest first
+            pick = next((i for i in ids if "sonnet" in i), None) or next((i for i in ids if "haiku" in i), None) or (ids[0] if ids else "")
+        else:
+            r = await client.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {s.openai_api_key}"})
+            r.raise_for_status()
+            skip = ("audio", "realtime", "search", "transcribe", "tts", "image", "instruct", "embedding", "moderation", "codex")
+            chat = sorted((m for m in r.json().get("data", []) if m["id"].startswith("gpt-") and not any(w in m["id"] for w in skip)),
+                          key=lambda m: m.get("created", 0), reverse=True)
+            pick = next((m["id"] for m in chat if m["id"].endswith("-mini")), None) or (chat[0]["id"] if chat else "")
+    finally:
+        if own:
+            await client.aclose()
+    if not pick:
+        raise RuntimeError("Your AI account didn't list any models. Set AI_MODEL to a model id from your provider's docs.")
+    _auto_model[key] = pick
+    return pick
+
+
 async def _call(system: str, msgs: list[dict], max_tokens: int) -> str:
     """One request to the configured provider. Raises on any error."""
     s = get_settings()
     async with httpx.AsyncClient(timeout=45) as client:
+        model = await model_id(client)
         if s.ai_provider == "anthropic":
             r = await client.post("https://api.anthropic.com/v1/messages",
                                   headers={"x-api-key": s.anthropic_api_key, "anthropic-version": "2023-06-01"},
-                                  json={"model": s.ai_model, "max_tokens": max_tokens, "system": system, "messages": msgs})
-            r.raise_for_status()
+                                  json={"model": model, "max_tokens": max_tokens, "system": system, "messages": msgs})
+            _raise(r)
             return "".join(b.get("text", "") for b in r.json()["content"]).strip()
         if s.ai_provider == "openai":
             # max_completion_tokens replaces the deprecated max_tokens and works with every current chat model.
             r = await client.post("https://api.openai.com/v1/chat/completions",
                                   headers={"Authorization": f"Bearer {s.openai_api_key}"},
-                                  json={"model": s.ai_model, "max_completion_tokens": max_tokens,
+                                  json={"model": model, "max_completion_tokens": max_tokens,
                                         "messages": [{"role": "system", "content": system}] + msgs})
-            r.raise_for_status()
+            _raise(r)
             return (r.json()["choices"][0]["message"]["content"] or "").strip()
     raise RuntimeError("AI isn't configured.")
+
+
+def _raise(r: httpx.Response) -> None:
+    """Turn provider errors into something an admin can act on."""
+    if r.status_code < 400:
+        return
+    try:
+        msg = (r.json().get("error") or {}).get("message", "") or r.text[:200]
+    except ValueError:
+        msg = r.text[:200]
+    hint = {401: "The API key is wrong or was revoked.", 403: "This key isn't allowed to use that model.",
+            404: "That model id doesn't exist on your account. Clear AI_MODEL to let Cadence pick one, or fix the spelling.",
+            429: "Rate limit or no credit left on the account. Check billing with your provider.",
+            400: "The provider rejected the request."}.get(r.status_code, "")
+    raise RuntimeError(f"{r.status_code}: {hint} {msg}".strip())
 
 
 async def _llm(system: str, question: str, f: dict | None, history: list, max_tokens: int) -> str | None:
@@ -179,13 +231,18 @@ def ai_problem() -> str:
         return ""
     if s.ai_provider not in {"anthropic", "openai"}:
         return f"Unknown AI_PROVIDER '{s.ai_provider}'. Use anthropic or openai."
-    if not s.ai_model:
-        return "Set AI_MODEL to a model id from your provider's docs."
-    if s.ai_provider == "anthropic" and not s.anthropic_api_key:
-        return "Set ANTHROPIC_API_KEY (console.anthropic.com → API keys)."
-    if s.ai_provider == "openai" and not s.openai_api_key:
-        return "Set OPENAI_API_KEY (platform.openai.com → API keys)."
+    key = "ANTHROPIC_API_KEY" if s.ai_provider == "anthropic" else "OPENAI_API_KEY"
+    if (s.ai_provider == "anthropic" and not s.anthropic_api_key) or (s.ai_provider == "openai" and not s.openai_api_key):
+        where = "console.anthropic.com → API keys" if s.ai_provider == "anthropic" else "platform.openai.com → API keys"
+        seen = [n for n in env_names_like("ANTHROPIC", "OPENAI", "CLAUDE", "API_KEY") if not n.startswith(("BREVO", "RESEND", "ARKESEL", "AFRICA"))]
+        return f"Set {key} ({where}) on the API service in Render." + (f" The server can see: {', '.join(seen)}." if seen else
+                                                                       " The server can't see any AI key at all.")
     return ""
+
+
+def model_label() -> str:
+    s = get_settings()
+    return s.ai_model or next(iter(_auto_model.values()), "") or "newest model on your account (AI_MODEL not set)"
 
 
 async def ping() -> tuple[str, str]:
@@ -197,7 +254,7 @@ async def ping() -> tuple[str, str]:
         return "failed", problem
     try:
         text = await _call("Reply with exactly: OK", [{"role": "user", "content": "Connection test"}], 10)
-        return "sent", f"{s.ai_provider} · {s.ai_model} answered: {text[:40]}"
+        return "sent", f"{s.ai_provider} · {await model_id()} answered: {text[:40]}"
     except httpx.HTTPStatusError as e:
         return "failed", f"{e.response.status_code}: {e.response.text[:300]}"
     except Exception as e:
@@ -206,8 +263,7 @@ async def ping() -> tuple[str, str]:
 
 def ai_connected() -> bool:
     s = get_settings()
-    return (s.ai_provider == "anthropic" and bool(s.anthropic_api_key and s.ai_model)) or \
-           (s.ai_provider == "openai" and bool(s.openai_api_key and s.ai_model))
+    return (s.ai_provider == "anthropic" and bool(s.anthropic_api_key)) or (s.ai_provider == "openai" and bool(s.openai_api_key))
 
 
 async def answer(message: str, s: Summary, history: list | None = None) -> dict:

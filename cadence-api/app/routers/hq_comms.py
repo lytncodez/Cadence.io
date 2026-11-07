@@ -57,8 +57,8 @@ async def system(admin: PlatformAdmin = Depends(current_hq_admin)):
         sms=_row(s.sms_provider, notify.sms_problem(), notify.sms_live_detail(), notify.SMS_DEMO_DETAIL),
         email=_row(s.email_provider, notify.email_problem(), f"Sending from {s.email_from or s.smtp_from or s.smtp_user} via {s.email_provider.title()}.",
                    "Demo mode: emails are logged, not sent. Set EMAIL_PROVIDER=brevo (or resend), its API key and EMAIL_FROM."),
-        ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {s.ai_model}.",
-                "Built-in wording only. Set AI_PROVIDER=anthropic, ANTHROPIC_API_KEY and AI_MODEL."),
+        ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {ai.model_label()}.",
+                "Built-in wording only. Set AI_PROVIDER=anthropic and ANTHROPIC_API_KEY (AI_MODEL is optional)."),
         cron=Integration(provider="cron", status="live" if s.cron_secret else "needs_setup",
                          detail="Digests, weekly reports and the HQ email go out when your scheduler calls /alerts/cron." if s.cron_secret
                          else "Set CRON_SECRET and add a cron-job.org job that calls POST /api/v1/alerts/cron every 15 minutes."),
@@ -85,7 +85,7 @@ async def test(body: TestIn, admin: PlatformAdmin = Depends(current_hq_admin), d
     s = get_settings()
     if body.channel == "ai":
         st, detail = await ai.ping()
-        notify.hq_log(db, "ai", s.ai_model or "", detail, st, detail if st == "failed" else "", "test")
+        notify.hq_log(db, "ai", ai.model_label(), detail, st, detail if st == "failed" else "", "test")
         await db.commit()
         return SendResult(channel="ai", status=st, detail=detail)
     if body.channel == "email":
