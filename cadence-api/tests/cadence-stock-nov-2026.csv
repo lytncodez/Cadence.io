@@ -1,0 +1,76 @@
+name,category,barcode,batch,expiry,qty,unit_cost,unit_price,supplier,reorder_level
+Coartem 80/480mg ×6,Antimalarials,6034000000016,C8C-2608,2027-06-25,66,42.00,68.00,Novartis via M&G,40
+Lonart DS ×6,Antimalarials,6034000000023,LDL-2603,2027-03-22,119,21.00,35.00,Bliss GVS,30
+Lonart DS ×6,Antimalarials,6034000000023,LDL-2608,2027-11-05,193,21.00,35.00,Bliss GVS,30
+Artesunate Inj 60mg,Antimalarials,6034000000030,AIA-2603,2027-01-25,46,28.00,45.00,Kinapharma,10
+Artesunate Inj 60mg,Antimalarials,6034000000030,AIA-2608,2028-04-11,62,28.00,45.00,Kinapharma,10
+Camosunate Tabs ×6,Antimalarials,6034000000047,CTC-2603,2026-11-21,19,18.00,30.00,Letap Pharma,20
+Camosunate Tabs ×6,Antimalarials,6034000000047,CTC-2608,2027-07-06,175,18.00,30.00,Letap Pharma,20
+Malaria RDT Kit,Diagnostics,6034000000054,MRM-2608,2027-07-31,53,6.00,15.00,Ernest Chemists,30
+Paracetamol 500mg Tabs ×100,Analgesics,6034000000061,P5P-2603,2027-01-06,96,18.50,32.00,Ernest Chemists,60
+Paracetamol 500mg Tabs ×100,Analgesics,6034000000061,P5P-2608,2027-08-28,153,18.50,32.00,Ernest Chemists,60
+Ibuprofen 400mg Tabs ×24,Analgesics,6034000000078,I4I-2603,2027-01-20,47,7.50,14.00,Letap Pharma,40
+Ibuprofen 400mg Tabs ×24,Analgesics,6034000000078,I4I-2608,2027-08-27,129,7.50,14.00,Letap Pharma,40
+Diclofenac 50mg Tabs ×30,Analgesics,6034000000085,D5D-2603,2026-11-25,69,5.50,12.00,Letap Pharma,20
+Diclofenac 50mg Tabs ×30,Analgesics,6034000000085,D5D-2608,2027-11-20,21,5.50,12.00,Letap Pharma,20
+Panadol Extra ×12,Analgesics,6034000000092,PEP-2603,2027-01-11,107,9.00,16.00,GSK Ghana,50
+Panadol Extra ×12,Analgesics,6034000000092,PEP-2608,2028-04-21,140,9.00,16.00,GSK Ghana,50
+Benylin Cough Syrup 100ml,Respiratory,6034000000108,BCB-2608,2027-09-02,13,22.00,38.00,Kenvue,20
+Tixylix Baby Syrup 100ml,Respiratory,6034000000115,TBT-2603,2027-02-16,33,19.00,32.00,Kenvue,15
+Tixylix Baby Syrup 100ml,Respiratory,6034000000115,TBT-2608,2028-03-25,72,19.00,32.00,Kenvue,15
+Cetirizine 10mg Tabs ×30,Respiratory,6034000000122,C1C-2603,2027-03-17,91,6.00,13.00,Tobinco Pharma,30
+Cetirizine 10mg Tabs ×30,Respiratory,6034000000122,C1C-2608,2028-01-31,160,6.00,13.00,Tobinco Pharma,30
+Ventolin Inhaler 100mcg,Respiratory,6034000000139,VIV-2608,2027-09-04,17,48.00,75.00,GSK Ghana,12
+Salbutamol 4mg Tabs ×28,Respiratory,6034000000146,S4S-2603,2027-01-07,23,4.00,9.00,Letap Pharma,15
+Salbutamol 4mg Tabs ×28,Respiratory,6034000000146,S4S-2608,2027-09-07,34,4.00,9.00,Letap Pharma,15
+Lemsip Max Sachets ×10,Respiratory,6034000000153,LML-2603,2027-01-14,61,24.00,40.00,Reckitt,15
+Lemsip Max Sachets ×10,Respiratory,6034000000153,LML-2608,2028-04-08,78,24.00,40.00,Reckitt,15
+ORS Sachets ×10,Rehydration,6034000000160,OSO-2603,2026-11-27,351,6.00,12.00,Kinapharma,60
+ORS Sachets ×10,Rehydration,6034000000160,OSO-2608,2027-10-17,115,6.00,12.00,Kinapharma,60
+Zinc 20mg Dispersible ×10,Rehydration,6034000000177,Z2Z-2603,2027-01-07,45,5.00,10.00,Kinapharma,30
+Zinc 20mg Dispersible ×10,Rehydration,6034000000177,Z2Z-2608,2027-09-17,66,5.00,10.00,Kinapharma,30
+Loperamide 2mg Caps ×12,Gastro,6034000000184,L2L-2603,2026-10-24,10,3.50,8.00,Letap Pharma,10
+Loperamide 2mg Caps ×12,Gastro,6034000000184,L2L-2608,2027-07-26,20,3.50,8.00,Letap Pharma,10
+Metronidazole 400mg Tabs ×21,Antibiotics,6034000000191,M4M-2603,2027-01-23,31,4.50,10.00,Tobinco Pharma,25
+Metronidazole 400mg Tabs ×21,Antibiotics,6034000000191,M4M-2608,2028-04-13,34,4.50,10.00,Tobinco Pharma,25
+Amoxicillin 500mg Caps ×21,Antibiotics,6034000000207,A5A-2603,2026-11-28,15,14.90,28.00,Tobinco Pharma,40
+Amoxicillin 500mg Caps ×21,Antibiotics,6034000000207,A5A-2608,2027-08-20,136,14.90,28.00,Tobinco Pharma,40
+Augmentin 625mg Tabs ×14,Antibiotics,6034000000214,A6A-2603,2027-04-05,16,96.00,145.00,GSK Ghana,10
+Augmentin 625mg Tabs ×14,Antibiotics,6034000000214,A6A-2608,2027-10-12,26,96.00,145.00,GSK Ghana,10
+Ciprofloxacin 500mg Tabs ×10,Antibiotics,6034000000221,C5C-2603,2027-02-25,27,11.00,22.00,Tobinco Pharma,15
+Ciprofloxacin 500mg Tabs ×10,Antibiotics,6034000000221,C5C-2608,2028-02-10,52,11.00,22.00,Tobinco Pharma,15
+Azithromycin 500mg Tabs ×3,Antibiotics,6034000000238,A5A-2603,2027-01-22,47,15.00,28.00,Ernest Chemists,15
+Azithromycin 500mg Tabs ×3,Antibiotics,6034000000238,A5A-2608,2028-03-20,93,15.00,28.00,Ernest Chemists,15
+Metformin 500mg Tabs ×28,Chronic care,6034000000245,M5M-2603,2027-02-05,50,8.60,16.00,Ernest Chemists,30
+Metformin 500mg Tabs ×28,Chronic care,6034000000245,M5M-2608,2027-12-13,84,8.60,16.00,Ernest Chemists,30
+Amlodipine 10mg Tabs ×28,Chronic care,6034000000252,A1A-2603,2027-01-08,53,7.00,15.00,Ernest Chemists,30
+Amlodipine 10mg Tabs ×28,Chronic care,6034000000252,A1A-2608,2027-12-18,90,7.00,15.00,Ernest Chemists,30
+Lisinopril 10mg Tabs ×28,Chronic care,6034000000269,L1L-2608,2027-10-24,10,9.00,18.00,Letap Pharma,20
+Insulin Mixtard 30/70 10ml,Chronic care,6034000000276,IMI-2603,2027-01-13,15,118.00,165.00,Novo Nordisk,8
+Insulin Mixtard 30/70 10ml,Chronic care,6034000000276,IMI-2608,2027-11-11,16,118.00,165.00,Novo Nordisk,8
+Atorvastatin 20mg Tabs ×30,Chronic care,6034000000283,A2A-2603,2027-01-29,22,16.50,30.00,Ernest Chemists,15
+Atorvastatin 20mg Tabs ×30,Chronic care,6034000000283,A2A-2608,2027-11-07,30,16.50,30.00,Ernest Chemists,15
+Omeprazole 20mg Caps ×28,Gastro,6034000000290,O2O-2603,2027-02-11,40,9.10,18.00,Letap Pharma,25
+Omeprazole 20mg Caps ×28,Gastro,6034000000290,O2O-2608,2027-08-24,66,9.10,18.00,Letap Pharma,25
+Gaviscon Liquid 200ml,Gastro,6034000000306,GLG-2603,2026-12-16,61,38.00,58.00,Reckitt,10
+Gaviscon Liquid 200ml,Gastro,6034000000306,GLG-2608,2028-03-05,18,38.00,58.00,Reckitt,10
+Ferrous Sulphate 200mg ×28,Supplements,6034000000313,FSF-2603,2027-02-16,27,4.00,9.00,Ernest Chemists,20
+Ferrous Sulphate 200mg ×28,Supplements,6034000000313,FSF-2608,2027-10-30,39,4.00,9.00,Ernest Chemists,20
+Folic Acid 5mg Tabs ×28,Supplements,6034000000320,FAF-2603,2027-01-28,32,3.00,7.00,Ernest Chemists,20
+Folic Acid 5mg Tabs ×28,Supplements,6034000000320,FAF-2608,2028-01-23,52,3.00,7.00,Ernest Chemists,20
+Vitamin C 1000mg Effervescent ×20,Supplements,6034000000337,VCV-2603,2026-10-20,10,19.00,35.00,Bayer West Africa,10
+Vitamin C 1000mg Effervescent ×20,Supplements,6034000000337,VCV-2608,2027-10-21,28,19.00,35.00,Bayer West Africa,10
+Multivitamin Syrup 200ml,Supplements,6034000000344,MSM-2603,2027-01-15,23,14.00,25.00,Kinapharma,12
+Multivitamin Syrup 200ml,Supplements,6034000000344,MSM-2608,2027-11-20,39,14.00,25.00,Kinapharma,12
+Clotrimazole 1% Cream 20g,Skin care,6034000000351,C1C-2603,2027-01-23,25,6.50,14.00,Kinapharma,15
+Clotrimazole 1% Cream 20g,Skin care,6034000000351,C1C-2608,2027-10-16,41,6.50,14.00,Kinapharma,15
+Hydrocortisone 1% Cream 15g,Skin care,6034000000368,H1H-2603,2026-12-16,61,7.00,15.00,Letap Pharma,10
+Hydrocortisone 1% Cream 15g,Skin care,6034000000368,H1H-2608,2028-01-21,18,7.00,15.00,Letap Pharma,10
+Calamine Lotion 100ml,Skin care,6034000000375,CLC-2603,2027-02-23,24,6.00,12.00,Kinapharma,10
+Calamine Lotion 100ml,Skin care,6034000000375,CLC-2608,2028-04-27,28,6.00,12.00,Kinapharma,10
+Hand Sanitiser 500ml,Hygiene,6034000000382,HSH-2603,2027-01-06,14,15.00,28.00,Kinapharma,12
+Hand Sanitiser 500ml,Hygiene,6034000000382,HSH-2608,2027-09-27,27,15.00,28.00,Kinapharma,12
+Condoms ×3,Sexual health,6034000000399,C×C-2603,2027-02-22,38,5.00,10.00,Reckitt,30
+Condoms ×3,Sexual health,6034000000399,C×C-2608,2028-04-01,70,5.00,10.00,Reckitt,30
+Pregnancy Test Kit,Diagnostics,6034000000405,PTP-2603,2027-02-21,27,4.00,12.00,Ernest Chemists,10
+Pregnancy Test Kit,Diagnostics,6034000000405,PTP-2608,2028-04-16,26,4.00,12.00,Ernest Chemists,10

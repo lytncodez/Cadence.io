@@ -4,7 +4,8 @@ import csv
 import io
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import ValidationError
@@ -13,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..deps import can_see_finance, current_user, require
-from ..models import Batch, Product, User
-from ..schemas import ImportResult, ImportRowError, ItemCreate, ItemOut, ItemUpdate, ParseResult
+from ..models import Batch, Product, Sale, User
+from ..schemas import ImportResult, ImportRowError, ItemCreate, ItemOut, ItemUpdate, ParseResult, SalesImportResult, SalesRowOut
 from ..serializers import item_out, sold_this_month
 
 from ..services import usage
@@ -236,3 +237,97 @@ async def import_items(
         usage.record(db, user.pharmacy_id, "import", user.id, added + updated)
         await db.commit()
     return ImportResult(dry_run=dry_run, total=total, added=added, updated=updated, errors=errors[:200], preview=good[:20])
+
+
+
+# ---------------- Sales history import (CSV or Excel) ----------------
+SALES_ALIASES = {"sale_date": "date", "sold_on": "date", "day": "date", "transaction_date": "date",
+                 "units": "qty", "quantity": "qty", "qty_sold": "qty", "units_sold": "qty", "sold": "qty",
+                 "sold_this_month": "qty"}
+_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _num(v, kind=float):
+    if v in (None, ""):
+        return None
+    try:
+        return kind(float(str(v).replace(",", "").replace("₵", "").strip()))
+    except ValueError:
+        raise ValueError(f"'{v}' isn't a number")
+
+
+@router.post("/sales-import", response_model=SalesImportResult)
+async def import_sales(
+    file: UploadFile = File(...),
+    dry_run: bool = Query(True, description="true = check and preview only; false = save"),
+    user: User = Depends(require("import")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import past sales (one row per sale or per day): date, barcode or name, optional batch, qty, optional unit_price and
+    unit_cost. Each row is matched to a medicine already in stock; without a batch it goes to that medicine's
+    earliest-expiring batch. Stock levels don't change: this is history, used for trends, reports and forecasts.
+    Rows already imported (same batch, day and quantity) are skipped, so a file can safely be imported twice."""
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(413, "That file is over 5 MB. Split it into smaller files.")
+    rows = [{SALES_ALIASES.get(k, k): v for k, v in r.items()} for r in _read_rows(file.filename or "", raw)]
+    if not rows:
+        raise HTTPException(400, "The file has no data rows under the header.")
+    if len(rows) > 20000:
+        raise HTTPException(400, f"That file has {len(rows)} rows; the limit is 20000 per file.")
+    products = (await db.scalars(select(Product).where(Product.pharmacy_id == user.pharmacy_id))).all()
+    by_code = {p.barcode: p for p in products if p.barcode}
+    by_name = {p.name.strip().lower(): p for p in products}
+    batches = (await db.scalars(select(Batch).join(Product).where(Product.pharmacy_id == user.pharmacy_id).order_by(Batch.expiry_date))).all()
+    by_product: dict = {}
+    for b in batches:
+        by_product.setdefault(b.product_id, []).append(b)
+    existing = {(s.batch_id, s.sold_at.date(), s.qty) for s in (await db.scalars(select(Sale).where(Sale.pharmacy_id == user.pharmacy_id))).all()}
+    errors: list[ImportRowError] = []
+    good: list[tuple] = []
+    dupes = 0
+    months: dict[str, int] = {}
+    today = date.today()
+    for i, r in enumerate(rows, start=2):
+        try:
+            d = _date(r.get("date"))
+            if not isinstance(d, date):
+                raise ValueError("date: use YYYY-MM-DD or DD/MM/YYYY")
+            if d > today:
+                raise ValueError("date: that's in the future")
+            code = r.get("barcode")
+            code = f"{code:.0f}" if isinstance(code, float) else str(code or "").strip()
+            p = by_code.get(code) or by_name.get(str(r.get("name") or "").strip().lower())
+            if not p:
+                raise ValueError("medicine: not in your stock. Import the stock file first (same barcode or name)")
+            qty = _num(r.get("qty"), int)
+            if not qty or qty <= 0:
+                raise ValueError("qty: must be 1 or more")
+            want = str(r.get("batch") or "").strip().lower()
+            choices = by_product.get(p.id, [])
+            b = next((x for x in choices if x.batch_no.lower() == want), None) if want else None
+            b = b or (choices[0] if choices else None)
+            if not b:
+                raise ValueError("batch: this medicine has no batches in stock")
+            price = _num(r.get("unit_price")) or float(p.unit_price)
+            cost = _num(r.get("unit_cost")) or float(p.unit_cost)
+        except ValueError as e:
+            errors.append(ImportRowError(row=i, error=str(e)))
+            continue
+        if (b.id, d, qty) in existing:
+            dupes += 1
+            continue
+        existing.add((b.id, d, qty))
+        good.append((d, p, b, qty, price, cost))
+        label = f"{_MON[d.month - 1]} {d.year}"
+        months[label] = months.get(label, 0) + qty
+    if not dry_run and good:
+        for d, p, b, qty, price, cost in good:
+            db.add(Sale(pharmacy_id=user.pharmacy_id, batch_id=b.id, qty=qty, unit_price=Decimal(str(round(price, 2))),
+                        unit_cost=Decimal(str(round(cost, 2))), sold_at=datetime.combine(d, time(12, 0), tzinfo=timezone.utc)))
+        usage.record(db, user.pharmacy_id, "import", user.id, len(good))
+        await db.commit()
+    ordered = dict(sorted(months.items(), key=lambda kv: (int(kv[0][-4:]), _MON.index(kv[0][:3]))))
+    return SalesImportResult(dry_run=dry_run, total=len(rows), added=len(good), duplicates=dupes, errors=errors[:200],
+                             preview=[SalesRowOut(sold_on=d, name=p.name, batch=b.batch_no, qty=q, unit_price=pr) for d, p, b, q, pr, _ in good[:20]],
+                             units_by_month=ordered)

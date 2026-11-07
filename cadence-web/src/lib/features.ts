@@ -314,6 +314,20 @@ export async function parseFile(file: File): Promise<ParseResult> {
   return parseLocal(file);
 }
 
+export interface SalesImportResult {
+  dryRun: boolean; total: number; added: number; duplicates: number; errors: { row: number; error: string }[];
+  preview: { soldOn: string; name: string; batch: string; qty: number; unitPrice: number }[]; unitsByMonth: Record<string, number>;
+}
+
+/** Import past sales (date, barcode or name, batch, qty, unit_price) so reports, trends and forecasts have history. */
+export async function importSales(file: File, dryRun: boolean): Promise<SalesImportResult> {
+  if (USE_MOCK) throw new Error("Sales history is saved by the Cadence server, so importing it works once the app is connected to the API (VITE_USE_MOCK=false).");
+  const fd = new FormData(); fd.append("file", file);
+  const r = await http<SalesImportResult>("POST", `/items/sales-import?dry_run=${dryRun}`, fd);
+  if (!dryRun && r.added > 0) await api.loadAll();
+  return r;
+}
+
 export async function importFile(file: File, dryRun: boolean): Promise<ImportResult> {
   if (!USE_MOCK) {
     const fd = new FormData(); fd.append("file", file);

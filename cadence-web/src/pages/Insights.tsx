@@ -24,7 +24,7 @@ const QUICK: { kind: AskKind; label: string; icon: typeof LuFileText; prompt: (d
   { kind: "margins", label: "Profit margins", icon: LuChartColumn, prompt: () => "Show profit margins by product." },
   { kind: "dashboard", label: "Dashboard", icon: LuLayoutGrid, prompt: () => "Give me a stock dashboard overview." },
 ];
-const SUGGEST = ["What should I reorder this week?", "How should insulin be stored?", "Tell me about Coartem", "How can I cut expiry losses?"];
+const SUGGEST = ["Predict next month's sales", "What should I reorder this week?", "Tell me about Coartem", "How can I cut expiry losses?"];
 
 export default function Insights() {
   const user = useCurrentUser()!;

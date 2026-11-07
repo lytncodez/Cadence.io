@@ -749,3 +749,63 @@ def test_gemini_provider_picks_a_flash_model_and_answers(monkeypatch):
     assert seen["body"]["systemInstruction"]["parts"][0]["text"] == "Be brief." and seen["body"]["contents"][-1]["role"] == "user"
     monkeypatch.setattr(s, "gemini_api_key", "")
     assert "GEMINI_API_KEY" in ai_svc.ai_problem() and not ai_svc.ai_connected()
+
+
+def test_gemini_retries_then_falls_back_when_busy(monkeypatch):
+    import asyncio as _a
+    import httpx as _h
+    from app.config import get_settings
+    from app.services import ai as ai_svc
+    s = get_settings()
+    monkeypatch.setattr(s, "ai_provider", "gemini")
+    monkeypatch.setattr(s, "gemini_api_key", "g-busy-key")
+    monkeypatch.setattr(s, "ai_model", "")
+    real_sleep = _a.sleep
+    monkeypatch.setattr(ai_svc.asyncio, "sleep", lambda *_: real_sleep(0))
+    ai_svc._auto_model.clear(); ai_svc._backups.clear()
+    calls = []
+
+    def handler(req):
+        if req.method == "GET":
+            return _h.Response(200, json={"models": [{"name": f"models/{n}", "supportedGenerationMethods": ["generateContent"]}
+                                                     for n in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")]})
+        name = str(req.url).split("/models/")[1].split(":")[0]
+        calls.append(name)
+        if name == "gemini-2.5-flash":
+            return _h.Response(503, json={"error": {"message": "This model is currently experiencing high demand."}})
+        return _h.Response(200, json={"candidates": [{"content": {"parts": [{"text": f"answered by {name}"}]}}]})
+
+    real = _h.AsyncClient
+    monkeypatch.setattr(ai_svc.httpx, "AsyncClient", lambda *a, **k: real(transport=_h.MockTransport(handler)))
+    assert _a.run(ai_svc._llm("sys", "hi", None, [], 100)) == "answered by gemini-2.0-flash"
+    assert calls == ["gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+
+
+def test_sales_history_import_and_forecast(client):
+    import os
+    from datetime import date
+    here = os.path.dirname(__file__)
+    a = login(client, "abena@harbourview.example")
+    with open(os.path.join(here, "cadence-stock-nov-2026.csv"), "rb") as f:
+        r = client.post("/api/v1/items/import?dry_run=false", files={"file": ("stock.csv", f, "text/csv")}, headers=a)
+    assert r.status_code == 200 and r.json()["added"] > 0 and not r.json()["errors"], r.text
+    path = os.path.join(here, "cadence-sales-sep-nov-2026.xlsx")
+    sales_ct = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    with open(path, "rb") as f:
+        check = client.post("/api/v1/items/sales-import", files={"file": ("sales.xlsx", f, sales_ct)}, headers=a).json()
+    assert check["dryRun"] and check["added"] > 1000 and not check["errors"], check["errors"][:3]
+    assert {"Sep 2026", "Oct 2026"} <= set(check["unitsByMonth"]) and check["preview"][0]["soldOn"]
+    with open(path, "rb") as f:
+        saved = client.post("/api/v1/items/sales-import?dry_run=false", files={"file": ("sales.xlsx", f, sales_ct)}, headers=a).json()
+    assert saved["added"] == check["added"]
+    with open(path, "rb") as f:  # importing the same file again adds nothing
+        again = client.post("/api/v1/items/sales-import?dry_run=false", files={"file": ("sales.xlsx", f, sales_ct)}, headers=a).json()
+    assert again["added"] == 0 and again["duplicates"] == saved["added"]
+    bad = client.post("/api/v1/items/sales-import", files={"file": ("x.csv", b"date,name,qty\n2026-10-01,Unknown Pill,3\n2099-01-01,Coartem 80/480mg \xc3\x976,2\n", "text/csv")}, headers=a).json()
+    assert len(bad["errors"]) == 2 and "not in your stock" in bad["errors"][0]["error"]
+    # The AI (built-in wording in tests) now predicts from that history
+    r = client.post("/api/v1/ai/chat", json={"message": "Predict next month's sales"}, headers=a).json()
+    assert "next 30 days" in r["text"] and "Coartem" in r["text"], r["text"]
+    meds = {m["medicine"]: m for m in r["facts"]["medicines"]} if isinstance(r.get("facts"), dict) else {}
+    if meds and date.today() >= date(2026, 11, 7):
+        assert meds["Coartem 80/480mg ×6"]["trend_last_full_months"].startswith("up")

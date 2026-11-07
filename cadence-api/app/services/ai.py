@@ -5,6 +5,8 @@ With AI_PROVIDER=mock (default) the wording comes from templates, so the feature
 With anthropic/openai:
   - questions about the pharmacy's figures get the computed FACTS and must not invent figures, but may add general advice;
   - any other question (medicines, regulation, business, general knowledge) is answered from the model's own knowledge."""
+import asyncio
+from datetime import date, timedelta
 import json
 import re
 import logging
@@ -21,6 +23,7 @@ SYSTEM_DATA = (
     "The user asked about their pharmacy's figures. Every figure about their stock, sales, losses or margins must come from FACTS: "
     "never invent, estimate or recalculate those numbers. Explain what the figures mean in 3 to 6 plain sentences, and you may add "
     "practical, widely accepted pharmacy-management advice (FEFO, supplier returns, reorder habits). Use cedis (₵). "
+    "If FACTS hold forecasts, present them as estimates based on recent sales, not certainties. "
     "Plain text only: no markdown headings, tables or bullet symbols."
 )
 SYSTEM_GENERAL = (
@@ -42,6 +45,9 @@ def route(message: str, s: Summary) -> str:
         return "margins"
     if has("dashboard", "overview", "snapshot", "status"):
         return "dashboard"
+    if has("predict", "forecast", "projection", "project ", "next month", "trend", "expect", "coming weeks", "coming months",
+           "going to sell", "will we", "will i", "future") and s.history and s.history["units"]:
+        return "forecast"
     if has("reorder", "low stock", "restock", "run out", "order"):
         return "reorder"
     if has("report", "summary", "month", "performance", "how did", s.months[-1]["label"].lower()):
@@ -60,9 +66,51 @@ def _product(message: str, s: Summary):
     return None
 
 
+def forecast(s: Summary, today: date | None = None, top: int = 12) -> list[dict]:
+    """Simple, explainable predictions per medicine from the last 30 days of sales: units next 30 days, days of cover,
+    run-out date, how the months are trending, and units likely to expire unsold (oldest batches used first)."""
+    today = today or date.today()
+    h = s.history or {}
+    labels, units, last30 = h.get("labels", []), h.get("units", {}), h.get("last30", {})
+    out = []
+    for p in s.products:
+        hist = units.get(p.barcode)
+        if not hist or not any(hist):
+            continue
+        rate = last30.get(p.barcode, 0) / 30
+        full = hist[:-1]  # completed months
+        trend = "steady"
+        if len(full) >= 2 and full[-2] > 0:
+            change = (full[-1] - full[-2]) / full[-2] * 100
+            trend = f"up {change:.0f}%" if change >= 10 else f"down {abs(change):.0f}%" if change <= -10 else "steady"
+        cover = round(p.usable / rate) if rate > 0 else None
+        # FEFO: walk usable batches oldest first; whatever can't be sold before its expiry is at risk.
+        at_risk, used = 0, 0.0
+        for b in sorted((b for b in p.batches if b.days > 0 and b.qty > 0), key=lambda b: b.days):
+            can_sell = max(rate * b.days - used, 0)
+            sell = min(b.qty, can_sell)
+            used += sell
+            at_risk += int(b.qty - sell)
+        out.append({
+            "medicine": p.name, "units_by_month": dict(zip(labels, hist)), "month_so_far_is_partial": True,
+            "trend_last_full_months": trend, "selling_per_day": round(rate, 1), "expected_next_30_days": round(rate * 30),
+            "usable_stock": p.usable, "days_of_cover": cover,
+            "runs_out_around": (today + timedelta(days=cover)).isoformat() if cover is not None else None,
+            "reorder_now": cover is not None and cover <= 21, "units_likely_to_expire_unsold": at_risk,
+        })
+    out.sort(key=lambda f: -sum(f["units_by_month"].values()))
+    return out[:top]
+
+
 def facts(kind: str, message: str, s: Summary) -> dict:
     k = s.kpi
     base = {"pharmacy": s.pharmacy, "month": k["month"]}
+    if kind == "forecast":
+        f = forecast(s)
+        return base | {"method": "Projected from the last 30 days of sales; monthly units are from Cadence's sales records.",
+                       "months": (s.history or {}).get("labels", []), "medicines": f,
+                       "reorder_soon": [x["medicine"] for x in f if x["reorder_now"]],
+                       "expiry_risk": [f"{x['medicine']}: {x['units_likely_to_expire_unsold']} units" for x in f if x["units_likely_to_expire_unsold"]]}
     if kind == "report":
         top = s.top[0] if s.top else None
         return base | {
@@ -104,6 +152,19 @@ def facts(kind: str, message: str, s: Summary) -> dict:
 
 
 def template(kind: str, f: dict) -> str:
+    if kind == "forecast":
+        meds = f["medicines"]
+        if not meds:
+            return "There isn't enough sales history yet to predict anything. Import past sales or record sales for a few weeks."
+        lines = [f"Based on the last 30 days of sales ({', '.join(f['months'])} history):"]
+        for x in meds[:6]:
+            cover = f"about {x['days_of_cover']} days of stock, running out around {x['runs_out_around']}" if x["days_of_cover"] is not None else "no recent sales"
+            lines.append(f"{x['medicine']}: expect about {x['expected_next_30_days']} units in the next 30 days ({x['trend_last_full_months']}); {cover}.")
+        if f["reorder_soon"]:
+            lines.append("Reorder soon: " + ", ".join(f["reorder_soon"]) + ".")
+        if f["expiry_risk"]:
+            lines.append("Likely to expire before it sells: " + "; ".join(f["expiry_risk"]) + ". Ask suppliers about returns now.")
+        return " ".join(lines)
     if kind == "report":
         dir_ = "up" if f["revenue_change_pct"] >= 0 else "down"
         lead = (f"{f['month']} revenue is {f['revenue']}, {dir_} {abs(f['revenue_change_pct'])}% on last month, with a {f['margin_pct']}% margin. "
@@ -133,6 +194,7 @@ def template(kind: str, f: dict) -> str:
 
 
 _auto_model: dict[str, str] = {}
+_backups: dict[str, list[str]] = {}  # other Gemini models to try when one is busy
 last_error = ""  # why the most recent AI call fell back to built-in wording (shown to the user)
 
 
@@ -162,7 +224,10 @@ async def model_id(client: httpx.AsyncClient | None = None) -> str:
                      and not any(w in m["name"] for w in skip)]
             ver = lambda n: [int(x) for x in re.findall(r"\d+", n.split("-")[1] if "-" in n else "0")] or [0]  # noqa: E731
             flash = sorted((n for n in names if "flash" in n and "lite" not in n), key=ver, reverse=True)
-            pick = (flash or sorted(names, key=ver, reverse=True) or [""])[0]
+            lite = sorted((n for n in names if "flash" in n and "lite" in n), key=ver, reverse=True)
+            ordered = flash + lite + [n for n in sorted(names, key=ver, reverse=True) if n not in flash and n not in lite]
+            pick = (ordered or [""])[0]
+            _backups[key] = ordered[1:6]  # tried in turn when the first is overloaded
         else:
             r = await client.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {s.openai_api_key}"})
             r.raise_for_status()
@@ -201,10 +266,17 @@ async def _call(system: str, msgs: list[dict], max_tokens: int) -> str:
         if s.ai_provider == "gemini":
             contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]} for m in msgs]
             # Newer Gemini models "think" before answering and that counts against the output limit, so leave room for it.
-            r = await client.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                                  headers={"x-goog-api-key": s.gemini_api_key},
-                                  json={"systemInstruction": {"parts": [{"text": system}]}, "contents": contents,
-                                        "generationConfig": {"maxOutputTokens": max(max_tokens * 4, 2048)}})
+            body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": contents,
+                    "generationConfig": {"maxOutputTokens": max(max_tokens * 4, 2048)}}
+            # Free-tier Gemini is often briefly "experiencing high demand" (503) or rate limited (429): wait and retry,
+            # then try the next model down rather than giving up.
+            plan = [model, model] + [m for m in _backups.get(f"gemini:{_key()[-6:]}", []) if m != model][:3]
+            for i, m in enumerate(plan):
+                r = await client.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                                      headers={"x-goog-api-key": s.gemini_api_key}, json=body)
+                if r.status_code not in (429, 500, 503) or i == len(plan) - 1:
+                    break
+                await asyncio.sleep(1.5 if i == 0 else 0.5)
             _raise(r)
             data = r.json()
             cands = data.get("candidates") or []
@@ -230,6 +302,7 @@ def _raise(r: httpx.Response) -> None:
     hint = {401: "The API key is wrong or was revoked.", 403: "This key isn't allowed to use that model.",
             404: "That model id doesn't exist on your account. Clear AI_MODEL to let Cadence pick one, or fix the spelling.",
             429: "Rate limit or no credit left on the account. On Gemini's free tier, wait a minute and try again.",
+            503: "The AI service is busy right now (this passes). Cadence already retried and tried other models; try again in a few minutes.",
             400: "The provider rejected the request."}.get(r.status_code, "")
     raise RuntimeError(f"{r.status_code}: {hint} {msg}".strip())
 
@@ -334,4 +407,4 @@ async def answer(message: str, s: Summary, history: list | None = None) -> dict:
     if not text:
         note = fallback_note()
         text = template(kind, f) + (f"\n\n{note}" if note and ai_connected() else "")
-    return {"kind": "text" if kind == "product" else kind, "text": text, "facts": f}
+    return {"kind": "text" if kind in ("product", "forecast") else kind, "text": text, "facts": f}

@@ -336,3 +336,21 @@ class ImportResult(CamelModel):
     updated: int
     errors: list[ImportRowError]
     preview: list[ItemCreate]
+
+
+class SalesRowOut(CamelModel):
+    sold_on: date
+    name: str
+    batch: str
+    qty: int
+    unit_price: float
+
+
+class SalesImportResult(CamelModel):
+    dry_run: bool
+    total: int
+    added: int
+    duplicates: int
+    errors: list[ImportRowError]
+    preview: list[SalesRowOut]
+    units_by_month: dict[str, int]

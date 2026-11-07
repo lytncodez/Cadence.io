@@ -57,6 +57,7 @@ class ProductRollup:
     price: float = 0.0
     reorder_level: int = 0
     batches: list[Row] = field(default_factory=list)
+    barcode: str = ""
 
     @property
     def margin(self) -> float:
@@ -74,6 +75,9 @@ class Summary:
     products: list[ProductRollup]
     months: list[dict]
     has_history: bool = True  # False for an uploaded file analysed on its own (no month-by-month sales)
+    # Units sold per product over the last few calendar months, for trends and forecasts:
+    # {"labels": ["Sep", "Oct", "Nov"], "units": {name: [..]}, "last30": {name: units}, "day_of_month": int}
+    history: dict | None = None
 
     @property
     def top(self) -> list[ProductRollup]:
@@ -120,14 +124,46 @@ async def summarize(db: AsyncSession, user) -> Summary:
     for r in rows:
         counts[r.status] += 1
         value[r.status] += r.value
-        pr = products.setdefault(r.barcode, ProductRollup(r.name, r.category, cost=r.unit_cost, price=r.unit_price, reorder_level=r.reorder_level))
+        pr = products.setdefault(r.barcode, ProductRollup(r.name, r.category, cost=r.unit_cost, price=r.unit_price, reorder_level=r.reorder_level,
+                                                          barcode=r.barcode))
         if r.status != "expired":
             pr.usable += r.qty
         pr.sold += r.sold
         pr.revenue += r.sold * r.unit_price
         pr.batches.append(r)
     months = [m.model_dump() for m in await monthly_route(6, user, db)]
-    return Summary(ph.name, ph.critical_days, ph.soon_days, rows, counts, value, list(products.values()), months)
+    return Summary(ph.name, ph.critical_days, ph.soon_days, rows, counts, value, list(products.values()), months,
+                   history=await sales_history(db, user.pharmacy_id))
+
+
+async def sales_history(db: AsyncSession, pharmacy_id, months: int = 3) -> dict:
+    """Units sold per product (keyed by barcode) in each of the last `months` calendar months (this month so far last),
+    plus the last 30 days."""
+    from datetime import datetime, timedelta, timezone
+    from ..models import Sale
+    today = date.today()
+    keys = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        keys.insert(0, (y, m))
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    start = datetime(keys[0][0], keys[0][1], 1, tzinfo=timezone.utc)
+    recent = datetime.now(timezone.utc) - timedelta(days=30)
+    rows = (await db.execute(
+        select(Product.barcode, Sale.sold_at, Sale.qty).select_from(Sale).join(Batch, Sale.batch_id == Batch.id).join(Product, Batch.product_id == Product.id)
+        .where(Sale.pharmacy_id == pharmacy_id, Sale.sold_at >= start)
+    )).all()
+    units: dict[str, list[int]] = {}
+    last30: dict[str, int] = {}
+    for name, sold_at, qty in rows:
+        k = (sold_at.year, sold_at.month)
+        if k in keys:
+            units.setdefault(name, [0] * len(keys))[keys.index(k)] += qty
+        at = sold_at if sold_at.tzinfo else sold_at.replace(tzinfo=timezone.utc)
+        if at >= recent:
+            last30[name] = last30.get(name, 0) + qty
+    labels = [["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][mm - 1] for _, mm in keys]
+    return {"labels": labels, "units": units, "last30": last30, "day_of_month": today.day}
 
 
 def _rollup(rows: list[Row]) -> tuple[dict, dict, list[ProductRollup]]:
