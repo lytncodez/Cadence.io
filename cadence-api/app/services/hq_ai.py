@@ -122,9 +122,9 @@ async def chat(message: str, rows: list[dict], history: list) -> dict:
     text = await ai._llm(SYSTEM_HQ, message, f, history, 800)
     if text:
         return {"text": text, "ai": True}
-    note = ("" if ai.ai_connected() else
-            "\n\nOpen questions need the AI service: set AI_PROVIDER, its API key and AI_MODEL on the server. Here's today's briefing instead.")
-    return {"text": (note.strip() + "\n\n" if note else "") + template_briefing(f), "ai": False}
+    why = ai.last_error or "AI isn't set up on the server (AI_PROVIDER and its API key)."
+    note = f"Cadence AI couldn't answer that: {why} Check HQ → System → AI. Here's today's briefing instead."
+    return {"text": note + "\n\n" + template_briefing(f), "ai": False}
 
 
 def _template_draft(notes: str) -> dict:

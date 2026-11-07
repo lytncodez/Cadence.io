@@ -58,7 +58,7 @@ async def system(admin: PlatformAdmin = Depends(current_hq_admin)):
         email=_row(s.email_provider, notify.email_problem(), f"Sending from {s.email_from or s.smtp_from or s.smtp_user} via {s.email_provider.title()}.",
                    "Demo mode: emails are logged, not sent. Set EMAIL_PROVIDER=brevo (or resend), its API key and EMAIL_FROM."),
         ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {ai.model_label()}.",
-                "Built-in wording only. Set AI_PROVIDER=anthropic and ANTHROPIC_API_KEY (AI_MODEL is optional)."),
+                "Built-in wording only. Set AI_PROVIDER=gemini and GEMINI_API_KEY (free at aistudio.google.com), or anthropic/openai with their key."),
         cron=Integration(provider="cron", status="live" if s.cron_secret else "needs_setup",
                          detail="Digests, weekly reports and the HQ email go out when your scheduler calls /alerts/cron." if s.cron_secret
                          else "Set CRON_SECRET on Render, then add a cron-job.org job every 15 minutes for <this API address>/api/v1/alerts/cron?secret=<your CRON_SECRET>."),

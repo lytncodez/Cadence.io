@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     ai_model: str = _env("AI_MODEL", "ANTHROPIC_MODEL", "OPENAI_MODEL", "MODEL")  # blank = pick your account's newest model
     anthropic_api_key: str = _env("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")
     openai_api_key: str = _env("OPENAI_API_KEY", "OPENAI_KEY")
+    gemini_api_key: str = _env("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_AI_API_KEY")  # free tier: aistudio.google.com
 
     # Public address of the web app, used in password-reset links (no trailing slash).
     app_url: str = "http://localhost:5173"
@@ -87,7 +88,8 @@ class Settings(BaseSettings):
     @field_validator("sms_provider", "email_provider", "ai_provider", mode="after")
     @classmethod
     def _lower(cls, v: str) -> str:
-        return v.lower().replace("'", "").replace(" ", "").replace("_", "") or "mock"
+        v = v.lower().replace("'", "").replace(" ", "").replace("_", "") or "mock"
+        return {"google": "gemini", "googleai": "gemini", "claude": "anthropic", "chatgpt": "openai"}.get(v, v)
 
     @property
     def origins(self) -> list[str]:

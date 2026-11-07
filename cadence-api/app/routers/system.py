@@ -42,7 +42,7 @@ async def integrations(user: User = Depends(require("manage_alerts", "company"))
         email=_row(s.email_provider, notify.email_problem(), f"Sending from {s.email_from or s.smtp_from or s.smtp_user} via {s.email_provider.title()}.",
                    "Demo mode: emails are logged, not sent. Set EMAIL_PROVIDER=brevo (or resend), its API key and EMAIL_FROM."),
         ai=_row(s.ai_provider, ai.ai_problem(), f"{s.ai_provider.title()} · {ai.model_label()}. Answers general questions too.",
-                "Built-in wording for stock questions; general questions are off. Set AI_PROVIDER and its API key (AI_MODEL is optional)."),
+                "Built-in wording for stock questions; general questions are off. Set AI_PROVIDER=gemini and GEMINI_API_KEY (free at aistudio.google.com), or anthropic/openai with their key."),
         digest=Integration(provider="cron", status="live" if s.cron_secret else "needs_setup",
                            detail="The daily digest runs when your scheduler calls /alerts/cron." if s.cron_secret
                            else "Set CRON_SECRET on Render, then add a cron-job.org job every 15 minutes for <this API address>/api/v1/alerts/cron?secret=<your CRON_SECRET>."),

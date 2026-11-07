@@ -225,6 +225,12 @@ async def _send_africastalking(c: httpx.AsyncClient, to: list[str], message: str
     if s.sms_sender_id.strip():
         form["from"] = s.sms_sender_id.strip()[:11]
     r = await c.post(url, data=form, headers={"apiKey": s.africastalking_api_key, "Accept": "application/json"})
+    if r.status_code == 401:
+        mode = "sandbox" if sandbox else f"live app '{s.africastalking_username.strip()}'"
+        return "failed", (f"401: Africa's Talking rejected the username and API key ({mode}, key ending ...{s.africastalking_api_key[-4:]}). "
+                          "The key must be generated inside the same app as the username: a sandbox key only works with the username "
+                          "'sandbox', and a live key only with your live app's username (not your login email). Generating a new key "
+                          "cancels the old one, so paste the newest key into Render.")
     if r.status_code >= 400:
         return "failed", f"{r.status_code}: {r.text[:300]}"
     try:

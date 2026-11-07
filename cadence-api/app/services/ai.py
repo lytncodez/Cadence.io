@@ -6,6 +6,7 @@ With anthropic/openai:
   - questions about the pharmacy's figures get the computed FACTS and must not invent figures, but may add general advice;
   - any other question (medicines, regulation, business, general knowledge) is answered from the model's own knowledge."""
 import json
+import re
 import logging
 
 import httpx
@@ -125,12 +126,14 @@ def template(kind: str, f: dict) -> str:
         return (f"{f['product']}: {f['usable_units']} usable units across {f['batches']} batches. Dispense {f['dispense_first']} first. "
                 f"{f['sold_this_month']} sold this month for {f['revenue_this_month']} at a {f['margin_pct']}% margin."
                 + (f" Stock is below its reorder level of {f['reorder_level']}." if f["below_reorder"] else ""))
-    return ("General questions need the AI service to be connected (set AI_PROVIDER and an API key on the server). "
-            "Right now I can answer from your records: ask for a report, where expiry losses come from, margins, "
+    return ((f"General questions need Cadence AI, which isn't answering: {last_error} " if last_error else
+             "General questions need the AI service to be connected (set AI_PROVIDER and an API key on the server). ")
+            + "Right now I can answer from your records: ask for a report, where expiry losses come from, margins, "
             "what to reorder, or about a product such as Coartem.")
 
 
 _auto_model: dict[str, str] = {}
+last_error = ""  # why the most recent AI call fell back to built-in wording (shown to the user)
 
 
 async def model_id(client: httpx.AsyncClient | None = None) -> str:
@@ -138,7 +141,7 @@ async def model_id(client: httpx.AsyncClient | None = None) -> str:
     s = get_settings()
     if s.ai_model:
         return s.ai_model
-    key = f"{s.ai_provider}:{(s.anthropic_api_key or s.openai_api_key)[-6:]}"
+    key = f"{s.ai_provider}:{_key()[-6:]}"
     if key in _auto_model:
         return _auto_model[key]
     own = client is None
@@ -150,6 +153,16 @@ async def model_id(client: httpx.AsyncClient | None = None) -> str:
             r.raise_for_status()
             ids = [m["id"] for m in r.json().get("data", [])]  # newest first
             pick = next((i for i in ids if "sonnet" in i), None) or next((i for i in ids if "haiku" in i), None) or (ids[0] if ids else "")
+        elif s.ai_provider == "gemini":
+            r = await client.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", headers={"x-goog-api-key": s.gemini_api_key})
+            r.raise_for_status()
+            skip = ("image", "tts", "audio", "live", "embedding", "thinking", "exp", "preview", "vision", "aqa", "learnlm", "gemma", "robotics", "computer")
+            names = [m["name"].removeprefix("models/") for m in r.json().get("models", [])
+                     if "generateContent" in (m.get("supportedGenerationMethods") or []) and m["name"].startswith("models/gemini")
+                     and not any(w in m["name"] for w in skip)]
+            ver = lambda n: [int(x) for x in re.findall(r"\d+", n.split("-")[1] if "-" in n else "0")] or [0]  # noqa: E731
+            flash = sorted((n for n in names if "flash" in n and "lite" not in n), key=ver, reverse=True)
+            pick = (flash or sorted(names, key=ver, reverse=True) or [""])[0]
         else:
             r = await client.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {s.openai_api_key}"})
             r.raise_for_status()
@@ -185,6 +198,21 @@ async def _call(system: str, msgs: list[dict], max_tokens: int) -> str:
                                         "messages": [{"role": "system", "content": system}] + msgs})
             _raise(r)
             return (r.json()["choices"][0]["message"]["content"] or "").strip()
+        if s.ai_provider == "gemini":
+            contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]} for m in msgs]
+            # Newer Gemini models "think" before answering and that counts against the output limit, so leave room for it.
+            r = await client.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                                  headers={"x-goog-api-key": s.gemini_api_key},
+                                  json={"systemInstruction": {"parts": [{"text": system}]}, "contents": contents,
+                                        "generationConfig": {"maxOutputTokens": max(max_tokens * 4, 2048)}})
+            _raise(r)
+            data = r.json()
+            cands = data.get("candidates") or []
+            text = "".join(p.get("text", "") for c in cands[:1] for p in (c.get("content") or {}).get("parts", []) if not p.get("thought"))
+            if not text.strip():
+                why = (data.get("promptFeedback") or {}).get("blockReason") or (cands[0].get("finishReason") if cands else "no answer")
+                raise RuntimeError(f"Gemini gave no text ({why}).")
+            return text.strip()
     raise RuntimeError("AI isn't configured.")
 
 
@@ -193,12 +221,15 @@ def _raise(r: httpx.Response) -> None:
     if r.status_code < 400:
         return
     try:
-        msg = (r.json().get("error") or {}).get("message", "") or r.text[:200]
+        err = r.json().get("error") or {}
+        if isinstance(err, list):  # some Google errors come as a list
+            err = err[0] if err else {}
+        msg = err.get("message", "") or r.text[:200]
     except ValueError:
         msg = r.text[:200]
     hint = {401: "The API key is wrong or was revoked.", 403: "This key isn't allowed to use that model.",
             404: "That model id doesn't exist on your account. Clear AI_MODEL to let Cadence pick one, or fix the spelling.",
-            429: "Rate limit or no credit left on the account. Check billing with your provider.",
+            429: "Rate limit or no credit left on the account. On Gemini's free tier, wait a minute and try again.",
             400: "The provider rejected the request."}.get(r.status_code, "")
     raise RuntimeError(f"{r.status_code}: {hint} {msg}".strip())
 
@@ -216,25 +247,37 @@ async def _llm(system: str, question: str, f: dict | None, history: list, max_to
         else:
             msgs.append(dict(t))
         last = t["role"]
+    global last_error
     if not ai_connected():
+        last_error = ai_problem() or "AI isn't set up on the server: set AI_PROVIDER (anthropic or openai) and its API key on Render."
         return None
     try:
-        return await _call(system, msgs, max_tokens) or None
+        out = await _call(system, msgs, max_tokens) or None
+        last_error = "" if out else "The AI service sent back an empty answer."
+        return out
     except Exception as e:  # never let the AI provider break the page; fall back to templates
         log.warning("AI provider failed, using template: %s", e)
+        last_error = str(e)[:300] or e.__class__.__name__
     return None
+
+
+def fallback_note() -> str:
+    """One line saying why the built-in answer was used instead of the AI, so it never fails silently."""
+    if not last_error:
+        return ""
+    return f"(Cadence AI isn't answering right now: {last_error} This is the built-in answer instead.)"
 
 
 def ai_problem() -> str:
     s = get_settings()
     if s.ai_provider == "mock":
         return ""
-    if s.ai_provider not in {"anthropic", "openai"}:
-        return f"Unknown AI_PROVIDER '{s.ai_provider}'. Use anthropic or openai."
-    key = "ANTHROPIC_API_KEY" if s.ai_provider == "anthropic" else "OPENAI_API_KEY"
-    if (s.ai_provider == "anthropic" and not s.anthropic_api_key) or (s.ai_provider == "openai" and not s.openai_api_key):
-        where = "console.anthropic.com → API keys" if s.ai_provider == "anthropic" else "platform.openai.com → API keys"
-        seen = [n for n in env_names_like("ANTHROPIC", "OPENAI", "CLAUDE", "API_KEY") if not n.startswith(("BREVO", "RESEND", "ARKESEL", "AFRICA"))]
+    if s.ai_provider not in PROVIDERS:
+        return f"Unknown AI_PROVIDER '{s.ai_provider}'. Use gemini, anthropic or openai."
+    if not _key():
+        key, where = PROVIDERS[s.ai_provider]
+        seen = [n for n in env_names_like("ANTHROPIC", "OPENAI", "CLAUDE", "GEMINI", "GOOGLE", "API_KEY")
+                if not n.startswith(("BREVO", "RESEND", "ARKESEL", "AFRICA"))]
         return f"Set {key} ({where}) on the API service in Render." + (f" The server can see: {', '.join(seen)}." if seen else
                                                                        " The server can't see any AI key at all.")
     return ""
@@ -263,7 +306,17 @@ async def ping() -> tuple[str, str]:
 
 def ai_connected() -> bool:
     s = get_settings()
-    return (s.ai_provider == "anthropic" and bool(s.anthropic_api_key)) or (s.ai_provider == "openai" and bool(s.openai_api_key))
+    return bool(_key()) and s.ai_provider in PROVIDERS
+
+
+PROVIDERS = {"anthropic": ("ANTHROPIC_API_KEY", "console.anthropic.com → API keys"),
+             "openai": ("OPENAI_API_KEY", "platform.openai.com → API keys"),
+             "gemini": ("GEMINI_API_KEY", "aistudio.google.com → Get API key (free tier, no card needed)")}
+
+
+def _key() -> str:
+    s = get_settings()
+    return {"anthropic": s.anthropic_api_key, "openai": s.openai_api_key, "gemini": s.gemini_api_key}.get(s.ai_provider, "")
 
 
 async def answer(message: str, s: Summary, history: list | None = None) -> dict:
@@ -277,5 +330,8 @@ async def answer(message: str, s: Summary, history: list | None = None) -> dict:
     f = facts(kind, message, s)
     # A question that names a product may also ask general things about it (storage, uses), so allow general knowledge there.
     system = SYSTEM_GENERAL if kind == "product" else SYSTEM_DATA
-    text = await _llm(system, message, f, history, 700) or template(kind, f)
+    text = await _llm(system, message, f, history, 700)
+    if not text:
+        note = fallback_note()
+        text = template(kind, f) + (f"\n\n{note}" if note and ai_connected() else "")
     return {"kind": "text" if kind == "product" else kind, "text": text, "facts": f}

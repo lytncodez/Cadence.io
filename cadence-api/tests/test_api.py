@@ -713,3 +713,39 @@ def test_daily_report_pdf_download_email_attachment_and_cron_by_address(client, 
     assert "No secret" in client.get("/api/v1/alerts/cron").json()["detail"]
     monkeypatch.setattr(get_settings(), "cron_secret", "")
     assert "isn't set" in client.get("/api/v1/alerts/cron?secret=x").json()["detail"]
+
+
+def test_gemini_provider_picks_a_flash_model_and_answers(monkeypatch):
+    import asyncio as _a
+    import httpx as _h
+    from app.config import get_settings
+    from app.services import ai as ai_svc
+    s = get_settings()
+    monkeypatch.setattr(s, "ai_provider", "gemini")
+    monkeypatch.setattr(s, "gemini_api_key", "g-test-key")
+    monkeypatch.setattr(s, "ai_model", "")
+    ai_svc._auto_model.clear()
+    seen = {}
+
+    def handler(req: _h.Request) -> _h.Response:
+        assert req.headers["x-goog-api-key"] == "g-test-key"
+        if req.method == "GET":
+            return _h.Response(200, json={"models": [
+                {"name": "models/gemini-1.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-flash-preview-tts", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"]}]})
+        seen["url"], seen["body"] = str(req.url), __import__("json").loads(req.content)
+        return _h.Response(200, json={"candidates": [{"content": {"parts": [{"text": "thinking…", "thought": True}, {"text": "FEFO means first expiry, first out."}]}}]})
+
+    real = _h.AsyncClient
+    monkeypatch.setattr(ai_svc.httpx, "AsyncClient", lambda *a, **k: real(transport=_h.MockTransport(handler)))
+    assert ai_svc.ai_connected() and ai_svc.ai_problem() == ""
+    out = _a.run(ai_svc._llm("Be brief.", "what is FEFO?", None, [], 200))
+    assert out == "FEFO means first expiry, first out."
+    assert seen["url"].endswith("/models/gemini-2.5-flash:generateContent")
+    assert seen["body"]["systemInstruction"]["parts"][0]["text"] == "Be brief." and seen["body"]["contents"][-1]["role"] == "user"
+    monkeypatch.setattr(s, "gemini_api_key", "")
+    assert "GEMINI_API_KEY" in ai_svc.ai_problem() and not ai_svc.ai_connected()
